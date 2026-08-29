@@ -31,7 +31,7 @@ async function main() {
   }
 
   // 2. Seed Master Data
-  const filePath = path.join(__dirname, '..', '..', 'Master Data.xlsx')
+  const filePath = path.join(process.cwd(), '..', 'Master Data.xlsx')
   console.log('Reading from', filePath)
   
   if (!fs.existsSync(filePath)) {

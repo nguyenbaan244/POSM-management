@@ -28,7 +28,7 @@ export default function DashboardCharts({ inventoryData, activityData }: { inven
                   ))}
                 </Pie>
                 <Tooltip 
-                  formatter={(value: number) => new Intl.NumberFormat('en').format(value)}
+                  formatter={(value: any) => new Intl.NumberFormat('en').format(value)}
                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
                 />
                 <Legend />
