@@ -8,32 +8,71 @@ datasource db {
 }
 
 model MasterData {
-  sku   String @id
-  descr String
+  sku     String
+  account String @default("Danone")
+  descr   String
+
+  @@id([sku, account])
 }
 
+model User {
+  id           String    @id @default(uuid())
+  username     String    @unique
+  passwordHash String
+  name         String
+  role         String    @default("USER") // ADMIN or USER
+  sessions     Session[]
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+}
 model Inventory {
-  sku      String @id
+  sku      String
+  account  String   @default("Danone")
   descr    String
   quantity Int    @default(0)
+
+  @@id([sku, account])
 }
 
 model Inbound {
-  id       Int      @id @default(autoincrement())
-  date     DateTime
-  sku      String
+  id        Int      @id @default(autoincrement())
+  orderCode String   @default("LEGACY")
+  account   String   @default("Danone")
+  reversed  Boolean  @default(false)
+  date      DateTime
+  sku       String
   descr    String
   quantity Int
   status   String?
   remark   String?
+  createdBy String  @default("System")
 }
 
 model Outbound {
-  id       Int      @id @default(autoincrement())
-  date     DateTime
-  sku      String
+  id        Int      @id @default(autoincrement())
+  orderCode String   @default("LEGACY")
+  account   String   @default("Danone")
+  reversed  Boolean  @default(false)
+  date      DateTime
+  sku       String
   descr    String
   quantity Int
   status   String?
   remark   String?
+  createdBy String  @default("System")
 }
+
+model ActionLog {
+  id        Int      @id @default(autoincrement())
+  userId    String?
+  username  String   @default("System")
+  action    String
+  details   String
+  createdAt DateTime @default(now())
+}
+
