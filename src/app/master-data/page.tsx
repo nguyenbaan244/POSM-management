@@ -9,7 +9,7 @@ export default function MasterDataPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   
-  const [formData, setFormData] = useState({ sku: "", descr: "" });
+  const [formData, setFormData] = useState({ account: "", sku: "", descr: "" });
   const [saving, setSaving] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
 
@@ -45,7 +45,7 @@ export default function MasterDataPage() {
         body: JSON.stringify(formData),
       });
       if (res.ok) {
-        setFormData({ sku: "", descr: "" });
+        setFormData({ account: "", sku: "", descr: "" });
         fetchMasterData();
         toast.success("SKU saved successfully");
       } else {
@@ -59,8 +59,9 @@ export default function MasterDataPage() {
   };
 
   const filteredData = masterData.filter(item => 
-    item.sku.toLowerCase().includes(search.toLowerCase()) || 
-    item.descr.toLowerCase().includes(search.toLowerCase())
+    (item.sku || "").toLowerCase().includes(search.toLowerCase()) || 
+    (item.descr || "").toLowerCase().includes(search.toLowerCase()) ||
+    (item.account || "").toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -87,6 +88,10 @@ export default function MasterDataPage() {
         </h2>
         
         <form onSubmit={handleSave} className="flex flex-col md:flex-row gap-4 items-end relative z-10">
+          <div className="flex-1 w-full">
+            <label className="block text-sm font-semibold text-slate-700 mb-2">Account <span className="text-red-500">*</span></label>
+            <input type="text" required value={formData.account} onChange={e => setFormData({...formData, account: e.target.value})} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all duration-200 font-medium text-slate-700 shadow-sm" placeholder="e.g. Danone" />
+          </div>
           <div className="flex-1 w-full">
             <label className="block text-sm font-semibold text-slate-700 mb-2">SKU <span className="text-red-500">*</span></label>
             <input type="text" required value={formData.sku} onChange={e => setFormData({...formData, sku: e.target.value})} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all duration-200 font-medium text-slate-700 shadow-sm uppercase placeholder:normal-case placeholder:font-normal" placeholder="e.g. ITEM-001" />
@@ -133,6 +138,7 @@ export default function MasterDataPage() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-white border-b border-slate-100 text-slate-500 text-xs uppercase tracking-wider">
+                  <th className="py-4 px-6 font-semibold">Account</th>
                   <th className="py-4 px-6 font-semibold">SKU Code</th>
                   <th className="py-4 px-6 font-semibold">Description</th>
                   <th className="py-4 px-6 font-semibold text-right">Actions</th>
@@ -151,7 +157,8 @@ export default function MasterDataPage() {
                 ) : (
                   filteredData.map((item, idx) => (
                     <tr key={idx} className="hover:bg-purple-50/30 transition-colors group">
-                      <td className="py-4 px-6 text-slate-900 font-bold w-1/3">
+                      <td className="py-4 px-6 text-slate-600 font-medium w-1/4">{item.account}</td>
+                      <td className="py-4 px-6 text-slate-900 font-bold w-1/4">
                         <div className="flex items-center">
                           <div className="w-2 h-2 rounded-full bg-purple-400 mr-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                           {item.sku}
@@ -162,7 +169,7 @@ export default function MasterDataPage() {
                         {currentUser?.role === "ADMIN" && (
                           <button 
                             onClick={() => {
-                              setFormData({ sku: item.sku, descr: item.descr });
+                              setFormData({ account: item.account || "", sku: item.sku, descr: item.descr });
                               window.scrollTo({ top: 0, behavior: 'smooth' });
                             }}
                             className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
