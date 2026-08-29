@@ -1,0 +1,39 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model MasterData {
+  sku   String @id
+  descr String
+}
+
+model Inventory {
+  sku      String @id
+  descr    String
+  quantity Int    @default(0)
+}
+
+model Inbound {
+  id       Int      @id @default(autoincrement())
+  date     DateTime
+  sku      String
+  descr    String
+  quantity Int
+  status   String?
+  remark   String?
+}
+
+model Outbound {
+  id       Int      @id @default(autoincrement())
+  date     DateTime
+  sku      String
+  descr    String
+  quantity Int
+  status   String?
+  remark   String?
+}
