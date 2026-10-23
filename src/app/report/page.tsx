@@ -371,8 +371,78 @@ export default function ReportPage() {
         </div>
       )}
 
+      {/* DEDICATED PERMANENT TABLE: BẢNG TỔNG HỢP THEO SKU & SỐ LƯỢNG TRONG KỲ */}
+      <div className="bg-white rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 overflow-hidden mb-8">
+        <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+          <div>
+            <h3 className="text-lg font-bold text-slate-800 flex items-center">
+              <Boxes className="w-5 h-5 mr-2 text-emerald-600" />
+              Bảng Tổng Hợp Dữ Liệu Theo SKU & Số Lượng (Tồn Đầu - Nhập - Xuất - Tồn Cuối)
+            </h3>
+            <p className="text-xs text-slate-500">Bảng theo dõi trực quan số liệu biến động của từng mã sản phẩm trong kỳ báo cáo</p>
+          </div>
+          <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl">
+            Tồn cuối kỳ: {period.closing.toLocaleString()} chiếc
+          </span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr className="bg-slate-50/70 border-b border-slate-200 text-slate-500 text-xs uppercase tracking-wider font-semibold">
+                <th className="py-3.5 px-6">Mã SKU</th>
+                <th className="py-3.5 px-6">Tên Sản Phẩm (Mô Tả)</th>
+                <th className="py-3.5 px-6 text-right">Tồn Đầu</th>
+                <th className="py-3.5 px-6 text-right text-blue-600">Tổng Nhập (+)</th>
+                <th className="py-3.5 px-6 text-right text-orange-600">Tổng Xuất (-)</th>
+                <th className="py-3.5 px-6 text-right">Biến Động</th>
+                <th className="py-3.5 px-6 text-right font-bold text-slate-900">Tồn Cuối</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 font-medium">
+              {skuTotals.map((row: any, idx: number) => (
+                <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
+                  <td className="py-3.5 px-6 font-bold text-slate-900">{row.sku}</td>
+                  <td className="py-3.5 px-6 text-slate-600 max-w-md truncate" title={row.descr}>{row.descr}</td>
+                  <td className="py-3.5 px-6 text-right text-slate-600">{row.opening.toLocaleString()}</td>
+                  <td className="py-3.5 px-6 text-right text-blue-600 font-bold">+{row.inbound.toLocaleString()}</td>
+                  <td className="py-3.5 px-6 text-right text-orange-600 font-bold">-{row.outbound.toLocaleString()}</td>
+                  <td className="py-3.5 px-6 text-right font-bold">
+                    <span className={`inline-block px-2 py-0.5 rounded-lg text-xs ${
+                      row.netChange > 0 
+                        ? "bg-emerald-50 text-emerald-700" 
+                        : row.netChange < 0 
+                        ? "bg-rose-50 text-rose-700" 
+                        : "bg-slate-50 text-slate-600"
+                    }`}>
+                      {row.netChange > 0 ? `+${row.netChange.toLocaleString()}` : row.netChange.toLocaleString()}
+                    </span>
+                  </td>
+                  <td className="py-3.5 px-6 text-right font-black text-slate-900">{row.closing.toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+            {skuTotals.length > 0 && (
+              <tfoot>
+                <tr className="bg-slate-900 text-white font-bold text-sm">
+                  <td colSpan={2} className="py-3.5 px-6">TỔNG CỘNG TOÀN KHO</td>
+                  <td className="py-3.5 px-6 text-right text-slate-300">{period.opening.toLocaleString()}</td>
+                  <td className="py-3.5 px-6 text-right text-blue-300">+{period.inbound.toLocaleString()}</td>
+                  <td className="py-3.5 px-6 text-right text-orange-300">-{period.outbound.toLocaleString()}</td>
+                  <td className="py-3.5 px-6 text-right text-emerald-300">
+                    {period.netChange >= 0 ? `+${period.netChange.toLocaleString()}` : period.netChange.toLocaleString()}
+                  </td>
+                  <td className="py-3.5 px-6 text-right font-black text-emerald-400">{period.closing.toLocaleString()}</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+
       {/* Navigation View Tabs */}
       <div className="flex items-center space-x-2 mb-6 border-b border-slate-200 pb-3">
+
         <button
           onClick={() => setActiveView("daily-overall")}
           className={`px-5 py-2.5 rounded-2xl font-bold text-sm transition-all flex items-center ${

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { 
   UploadCloud, 
   FileSpreadsheet, 
@@ -31,8 +31,22 @@ export default function UploadDataPage() {
   const [totalRowsCount, setTotalRowsCount] = useState<number>(0);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<any | null>(null);
+  const [currentInventory, setCurrentInventory] = useState<any[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const fetchCurrentInventory = () => {
+    fetch("/api/inventory")
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) setCurrentInventory(data);
+      })
+      .catch(console.error);
+  };
+
+  useEffect(() => {
+    fetchCurrentInventory();
+  }, []);
 
   const formatConfig: Record<UploadFormat, {
     title: string;
@@ -149,6 +163,7 @@ export default function UploadDataPage() {
       const data = await res.json();
       if (res.ok) {
         setUploadResult(data);
+        fetchCurrentInventory();
         toast.success(data.message || "Tải lên và xử lý dữ liệu thành công!");
         // Reset file selection
         setFile(null);
@@ -439,8 +454,70 @@ export default function UploadDataPage() {
         </div>
       </div>
 
+      {/* Real-time SKU & Quantity Overview Table */}
+      {currentInventory.length > 0 && (
+        <div className="bg-white rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 overflow-hidden mb-8">
+          <div className="p-6 border-b border-slate-100 bg-slate-50/60 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+            <div>
+              <h3 className="text-lg font-bold text-slate-800 flex items-center">
+                <PackageSearch className="w-5 h-5 mr-2 text-emerald-600" />
+                Bảng Thống Kê Dữ Liệu Theo SKU & Số Lượng Tồn Kho Hiện Tại
+              </h3>
+              <p className="text-xs text-slate-500">Đối soát trực quan số lượng tồn thực tế của từng mã sản phẩm Danone</p>
+            </div>
+            <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl">
+              Tổng tồn kho: {currentInventory.reduce((s, x) => s + (x.quantity || 0), 0).toLocaleString()} chiếc
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-sm">
+              <thead>
+                <tr className="bg-slate-50/70 border-b border-slate-200 text-slate-500 text-xs uppercase tracking-wider font-semibold">
+                  <th className="py-3.5 px-6">Mã SKU</th>
+                  <th className="py-3.5 px-6">Tên Sản Phẩm (Mô Tả)</th>
+                  <th className="py-3.5 px-6 text-right">Số Lượng Tồn</th>
+                  <th className="py-3.5 px-6 text-right">Tỷ Trọng (%)</th>
+                  <th className="py-3.5 px-6 text-center">Trạng Thái</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-medium">
+                {currentInventory.map((item, idx) => {
+                  const total = currentInventory.reduce((s, x) => s + (x.quantity || 0), 0);
+                  const share = total > 0 ? ((item.quantity / total) * 100).toFixed(1) : 0;
+                  return (
+                    <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
+                      <td className="py-3.5 px-6 font-bold text-slate-900">{item.sku}</td>
+                      <td className="py-3.5 px-6 text-slate-600 max-w-md truncate" title={item.descr}>{item.descr}</td>
+                      <td className="py-3.5 px-6 text-right font-black text-slate-900">{item.quantity.toLocaleString()}</td>
+                      <td className="py-3.5 px-6 text-right font-semibold text-slate-500">{share}%</td>
+                      <td className="py-3.5 px-6 text-center">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          Sẵn Sàng
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="bg-slate-900 text-white font-bold text-sm">
+                  <td colSpan={2} className="py-3.5 px-6">TỔNG CỘNG TẤT CẢ SKU</td>
+                  <td className="py-3.5 px-6 text-right font-black text-emerald-400">
+                    {currentInventory.reduce((s, x) => s + (x.quantity || 0), 0).toLocaleString()}
+                  </td>
+                  <td className="py-3.5 px-6 text-right text-slate-300">100%</td>
+                  <td className="py-3.5 px-6 text-center text-xs text-emerald-300">Hoạt động bình thường</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Guide & Rules */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+
         <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
           <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600 mb-3">
             <ArrowDownToLine className="w-5 h-5" />

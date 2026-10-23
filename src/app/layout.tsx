@@ -21,14 +21,15 @@ export default async function RootLayout({
   const user = { name: "Admin", role: "ADMIN" };
 
   return (
-    <html lang="en">
-      <body className={`${inter.className} min-h-screen bg-slate-50 flex overflow-hidden`}>
+    <html lang="en" className="h-full">
+      <body className={`${inter.className} h-screen bg-slate-50 flex overflow-hidden`}>
         <Sidebar user={user} />
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 h-screen overflow-y-auto min-w-0">
           {children}
         </main>
         <Toaster position="top-center" richColors theme="light" />
       </body>
     </html>
+
   );
 }

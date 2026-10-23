@@ -349,9 +349,72 @@ export default function InboundPage() {
         </div>
       </div>
 
+      {/* DEDICATED TABLE: TỔNG HỢP THEO SKU & SỐ LƯỢNG NHẬP */}
+      <div className="bg-white rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 overflow-hidden mb-8">
+        <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+          <div>
+            <h3 className="text-lg font-bold text-slate-800 flex items-center">
+              <Boxes className="w-5 h-5 mr-2 text-blue-600" />
+              Bảng Thống Kê Nhập Kho Theo Từng Mã SKU & Số Lượng
+            </h3>
+            <p className="text-xs text-slate-500">Tổng hợp chi tiết số lượng nhập và số phiếu giao nhận theo từng mã hàng</p>
+          </div>
+          <span className="text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-xl">
+            Tổng nhập: +{totalQuantity.toLocaleString()} chiếc
+          </span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr className="bg-slate-50/70 border-b border-slate-200 text-slate-500 text-xs uppercase tracking-wider font-semibold">
+                <th className="py-3.5 px-6">Mã SKU</th>
+                <th className="py-3.5 px-6">Tên Sản Phẩm (Mô Tả)</th>
+                <th className="py-3.5 px-6 text-right text-blue-600">Số Lượng Nhập (+)</th>
+                <th className="py-3.5 px-6 text-right">Số Lô / Phiếu</th>
+                <th className="py-3.5 px-6 text-right">Tỷ Trọng Nhập (%)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 font-medium">
+              {skuStats.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="py-8 text-center text-slate-400">
+                    Không có phát sinh nhập kho trong kỳ này.
+                  </td>
+                </tr>
+              ) : (
+                skuStats.map((item: any, idx: number) => {
+                  const share = totalQuantity > 0 ? ((item.quantity / totalQuantity) * 100).toFixed(1) : 0;
+                  return (
+                    <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
+                      <td className="py-3.5 px-6 font-bold text-slate-900">{item.sku}</td>
+                      <td className="py-3.5 px-6 text-slate-600 max-w-md truncate" title={item.descr}>{item.descr}</td>
+                      <td className="py-3.5 px-6 text-right font-black text-blue-600">+{item.quantity.toLocaleString()}</td>
+                      <td className="py-3.5 px-6 text-right font-semibold text-slate-700">{item.count} phiếu</td>
+                      <td className="py-3.5 px-6 text-right font-semibold text-slate-500">{share}%</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+            {skuStats.length > 0 && (
+              <tfoot>
+                <tr className="bg-slate-900 text-white font-bold text-sm">
+                  <td colSpan={2} className="py-3.5 px-6">TỔNG CỘNG TẤT CẢ SKU</td>
+                  <td className="py-3.5 px-6 text-right font-black text-blue-300">+{totalQuantity.toLocaleString()}</td>
+                  <td className="py-3.5 px-6 text-right text-slate-300">{totalCount} phiếu</td>
+                  <td className="py-3.5 px-6 text-right text-slate-300">100%</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+
       {/* Inbound Transactions Table */}
       <div className="bg-white rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 overflow-hidden">
         <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+
           <div>
             <h3 className="text-lg font-bold text-slate-800">Danh Sách Chi Tiết Các Phiếu Nhập Kho</h3>
             <p className="text-xs text-slate-500">Hiển thị {paginatedItems.length} trên tổng số {items.length} bản ghi</p>
