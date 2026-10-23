@@ -78,7 +78,6 @@ export default function MasterDataPage() {
         </div>
       </div>
 
-      {currentUser?.role === "ADMIN" && (
       <div className="bg-white p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 mb-8 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-purple-50 to-transparent rounded-bl-full pointer-events-none" />
         
@@ -94,7 +93,7 @@ export default function MasterDataPage() {
           </div>
           <div className="flex-1 w-full">
             <label className="block text-sm font-semibold text-slate-700 mb-2">SKU <span className="text-red-500">*</span></label>
-            <input type="text" required value={formData.sku} onChange={e => setFormData({...formData, sku: e.target.value})} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all duration-200 font-medium text-slate-700 shadow-sm uppercase placeholder:normal-case placeholder:font-normal" placeholder="e.g. ITEM-001" />
+            <input type="text" required value={formData.sku} onChange={e => setFormData({...formData, sku: e.target.value})} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all duration-200 font-medium text-slate-700 shadow-sm uppercase placeholder:normal-case placeholder:font-normal" placeholder="e.g. 194402" />
           </div>
           <div className="flex-[2] w-full">
             <label className="block text-sm font-semibold text-slate-700 mb-2">Description <span className="text-red-500">*</span></label>
@@ -105,7 +104,7 @@ export default function MasterDataPage() {
           </button>
         </form>
       </div>
-      )}
+
 
       <div className="bg-white rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 overflow-hidden relative">
         <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-center bg-slate-50/50">
@@ -166,19 +165,18 @@ export default function MasterDataPage() {
                       </td>
                       <td className="py-4 px-6 text-slate-600 font-medium">{item.descr}</td>
                       <td className="py-4 px-6 text-right">
-                        {currentUser?.role === "ADMIN" && (
-                          <button 
-                            onClick={() => {
-                              setFormData({ account: item.account || "", sku: item.sku, descr: item.descr });
-                              window.scrollTo({ top: 0, behavior: 'smooth' });
-                            }}
-                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
-                            title="Edit SKU"
-                          >
-                            <Edit className="w-5 h-5" />
-                          </button>
-                        )}
+                        <button 
+                          onClick={() => {
+                            setFormData({ account: item.account || "", sku: item.sku, descr: item.descr });
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
+                          title="Sửa SKU"
+                        >
+                          <Edit className="w-5 h-5" />
+                        </button>
                       </td>
+
                     </tr>
                   ))
                 )}

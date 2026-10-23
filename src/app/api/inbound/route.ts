@@ -92,14 +92,92 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const history = await prisma.inbound.findMany({
-      orderBy: { id: 'desc' },
-      take: 50,
+    const { searchParams } = new URL(request.url);
+    const month = searchParams.get("month"); // e.g. "2026-10"
+    const selectedDate = searchParams.get("date"); // e.g. "2026-10-23"
+    const sku = searchParams.get("sku");
+    const search = searchParams.get("search");
+
+    let whereClause: any = { reversed: false };
+
+    if (selectedDate && selectedDate !== "all") {
+      const start = new Date(selectedDate);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(selectedDate);
+      end.setHours(23, 59, 59, 999);
+      whereClause.date = { gte: start, lte: end };
+    } else if (month && month !== "all") {
+      const [y, m] = month.split('-').map(Number);
+      const start = new Date(y, m - 1, 1);
+      const end = new Date(y, m, 0, 23, 59, 59, 999);
+      whereClause.date = { gte: start, lte: end };
+    }
+
+    if (sku && sku !== "all") {
+      whereClause.sku = sku;
+    }
+
+    if (search) {
+      whereClause.OR = [
+        { sku: { contains: search, mode: 'insensitive' } },
+        { descr: { contains: search, mode: 'insensitive' } },
+        { orderCode: { contains: search, mode: 'insensitive' } },
+        { remark: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const items = await prisma.inbound.findMany({
+      where: whereClause,
+      orderBy: { date: 'desc' }
     });
-    return NextResponse.json(history);
+
+    // Compute stats
+    let totalQuantity = 0;
+    const dailyMap: Record<string, number> = {};
+    const skuMap: Record<string, { sku: string, descr: string, quantity: number, count: number }> = {};
+
+    items.forEach(item => {
+      totalQuantity += item.quantity;
+      const d = item.date.toISOString().split('T')[0];
+      dailyMap[d] = (dailyMap[d] || 0) + item.quantity;
+
+      if (!skuMap[item.sku]) {
+        skuMap[item.sku] = { sku: item.sku, descr: item.descr, quantity: 0, count: 0 };
+      }
+      skuMap[item.sku].quantity += item.quantity;
+      skuMap[item.sku].count += 1;
+    });
+
+    const dailyStats = Object.entries(dailyMap)
+      .map(([date, quantity]) => ({ date, quantity }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const skuStats = Object.values(skuMap).sort((a, b) => b.quantity - a.quantity);
+
+    // Get all available dates and months from all inbound data
+    const allInbounds = await prisma.inbound.findMany({
+      select: { date: true },
+      distinct: ['date'],
+      orderBy: { date: 'desc' }
+    });
+    
+    const availableDates = Array.from(new Set(allInbounds.map(x => x.date.toISOString().split('T')[0])));
+    const availableMonths = Array.from(new Set(availableDates.map(d => d.substring(0, 7))));
+
+    return NextResponse.json({
+      items,
+      totalQuantity,
+      totalCount: items.length,
+      dailyStats,
+      skuStats,
+      availableDates,
+      availableMonths
+    });
   } catch (error) {
+    console.error("Failed to fetch inbound history:", error);
     return NextResponse.json({ error: "Failed to fetch inbound history" }, { status: 500 });
   }
 }
+

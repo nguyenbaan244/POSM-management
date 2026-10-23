@@ -1,40 +1,78 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { PackageSearch, Search, AlertCircle, Edit, X, Save } from "lucide-react";
+import { 
+  PackageSearch, 
+  Search, 
+  AlertCircle, 
+  Edit, 
+  X, 
+  Save, 
+  Boxes, 
+  PieChart as PieIcon, 
+  Layers,
+  ArrowUpRight,
+  CheckCircle2
+} from "lucide-react";
 import { toast } from "sonner";
+import { 
+  PieChart, 
+  Pie, 
+  Cell, 
+  Tooltip, 
+  ResponsiveContainer, 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid 
+} from "recharts";
+
+const COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4"];
 
 export default function InventoryPage() {
   const [data, setData] = useState<any[]>([]);
   const [search, setSearch] = useState("");
-  
-  // Modal state
+  const [loading, setLoading] = useState(true);
+
+  // Modal state for stock adjustments
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedSku, setSelectedSku] = useState<any>(null);
   const [newQuantity, setNewQuantity] = useState("");
   const [adjustReason, setAdjustReason] = useState("");
   const [isAdjusting, setIsAdjusting] = useState(false);
-  const [currentUser, setCurrentUser] = useState<any>(null);
+
+  const fetchInventory = () => {
+    setLoading(true);
+    fetch("/api/inventory")
+      .then(res => res.json())
+      .then(resData => {
+        setData(resData);
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error("Failed to load inventory:", err);
+        setLoading(false);
+      });
+  };
 
   useEffect(() => {
-    fetch("/api/auth/me").then(res => res.json()).then(data => {
-      if (!data.error) setCurrentUser(data);
-    }).catch(console.error);
     fetchInventory();
   }, []);
 
-  const fetchInventory = () => {
-    fetch("/api/inventory")
-      .then(res => res.json())
-      .then(setData)
-      .catch(console.error);
-  };
+  const totalStock = data.reduce((sum, item) => sum + item.quantity, 0);
 
   const filteredData = data.filter(item => 
     item.sku.toLowerCase().includes(search.toLowerCase()) || 
     item.descr?.toLowerCase().includes(search.toLowerCase()) ||
     item.account?.toLowerCase().includes(search.toLowerCase())
   );
+
+  const pieChartData = data.map(item => ({
+    name: item.sku,
+    value: item.quantity,
+    descr: item.descr
+  }));
 
   const openEditModal = (item: any) => {
     setSelectedSku(item);
@@ -45,7 +83,7 @@ export default function InventoryPage() {
 
   const handleAdjust = async () => {
     if (!newQuantity || !adjustReason) {
-      toast.error("Please provide the new quantity and a reason for adjustment.");
+      toast.error("Vui lòng nhập số lượng mới và lý do điều chỉnh.");
       return;
     }
     
@@ -66,14 +104,14 @@ export default function InventoryPage() {
 
       if (res.ok) {
         setIsModalOpen(false);
-        fetchInventory(); // refresh data
-        toast.success("Inventory adjusted successfully");
+        fetchInventory();
+        toast.success("Điều chỉnh tồn kho thành công!");
       } else {
         const err = await res.json();
-        toast.error(err.error || "Failed to adjust inventory");
+        toast.error(err.error || "Không thể điều chỉnh tồn kho");
       }
     } catch (e) {
-      toast.error("Error adjusting inventory");
+      toast.error("Lỗi khi điều chỉnh");
     } finally {
       setIsAdjusting(false);
     }
@@ -81,31 +119,121 @@ export default function InventoryPage() {
 
   return (
     <div className="p-8 max-w-7xl mx-auto animate-in">
-      <div className="flex items-center space-x-4 mb-8">
-        <div className="w-12 h-12 rounded-2xl bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-inner">
-          <PackageSearch className="w-6 h-6" />
-        </div>
-        <div>
-          <h1 className="text-3xl font-black text-slate-800 tracking-tight">Stock Inventory</h1>
-          <p className="text-slate-500 font-medium">Real-time overview of your warehouse stocks</p>
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
+        <div className="flex items-center space-x-4">
+          <div className="w-14 h-14 rounded-3xl bg-gradient-to-tr from-emerald-500 to-teal-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
+            <PackageSearch className="w-7 h-7" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-black text-slate-800 tracking-tight">
+              Báo Cáo Tồn Kho Thực Tế
+            </h1>
+            <p className="text-slate-500 font-medium">
+              Số lượng tồn kho cập nhật theo thời gian thực của các sản phẩm Danone
+            </p>
+          </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 overflow-hidden relative z-10">
-        <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-center bg-slate-50/50">
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
+        <div className="bg-white p-6 rounded-3xl border border-emerald-100 shadow-[0_8px_30px_rgb(16,185,129,0.06)] relative overflow-hidden">
+          <div className="absolute -right-4 -top-4 w-24 h-24 bg-emerald-50 rounded-full" />
+          <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider mb-1">Tổng Số Lượng Tồn Kho</p>
+          <h3 className="text-3xl font-black text-slate-800">
+            {totalStock.toLocaleString()} <span className="text-sm font-semibold text-slate-400">chiếc (EA)</span>
+          </h3>
+          <p className="text-xs text-slate-500 mt-2 font-medium">Toàn bộ hàng trong kho hiện tại</p>
+        </div>
+
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.03)]">
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Số Mặt Hàng Đang Lưu Kho</p>
+          <h3 className="text-3xl font-black text-slate-800">
+            {data.length} <span className="text-sm font-semibold text-slate-400">mã SKU</span>
+          </h3>
+          <p className="text-xs text-slate-500 mt-2 font-medium">Được định danh và quản lý</p>
+        </div>
+
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.03)]">
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Mặt Hàng Tồn Lớn Nhất</p>
+          <h3 className="text-3xl font-black text-emerald-600">
+            {data.length > 0 ? data.sort((a, b) => b.quantity - a.quantity)[0]?.sku : "-"}
+          </h3>
+          <p className="text-xs text-slate-500 mt-2 font-medium truncate">
+            {data.length > 0 ? data.sort((a, b) => b.quantity - a.quantity)[0]?.descr : ""}
+          </p>
+        </div>
+      </div>
+
+      {/* Visual Distribution Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        {/* Donut Chart */}
+        <div className="bg-white p-6 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100">
+          <h3 className="text-lg font-bold text-slate-800 mb-1">Tỷ Trọng Tồn Kho Theo SKU</h3>
+          <p className="text-xs text-slate-500 mb-4">Cơ cấu số lượng sản phẩm lưu kho</p>
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={pieChartData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={55}
+                  outerRadius={85}
+                  paddingAngle={4}
+                  dataKey="value"
+                >
+                  {pieChartData.map((_, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  formatter={(value: any) => [`${Number(value).toLocaleString()} chiếc`, "Tồn kho"]}
+                  contentStyle={{ borderRadius: "12px", border: "1px solid #e2e8f0" }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Bar Breakdown */}
+        <div className="lg:col-span-2 bg-white p-6 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100">
+          <h3 className="text-lg font-bold text-slate-800 mb-1">Số Lượng Tồn Kho Từng Sản Phẩm</h3>
+          <p className="text-xs text-slate-500 mb-4">So sánh số dư thực tế giữa các mã SKU</p>
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={pieChartData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="name" stroke="#94a3b8" fontSize={11} tickLine={false} />
+                <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} />
+                <Tooltip
+                  formatter={(val: any) => [`${Number(val).toLocaleString()} chiếc`, "Số lượng"]}
+                  contentStyle={{ borderRadius: "12px", border: "1px solid #e2e8f0" }}
+                />
+                <Bar dataKey="value" fill="#10b981" radius={[6, 6, 0, 0]} maxBarSize={45} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      {/* Inventory Table */}
+      <div className="bg-white rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 overflow-hidden">
+        <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-50/50">
           <div>
-            <h2 className="text-xl font-bold text-slate-800">Current Stock Levels</h2>
-            <p className="text-sm text-slate-500 font-medium">{filteredData.length} active items</p>
+            <h2 className="text-xl font-bold text-slate-800">Bảng Chi Tiết Tồn Kho</h2>
+            <p className="text-xs text-slate-500 font-medium">Hiện có {filteredData.length} mã sản phẩm</p>
           </div>
           
-          <div className="relative mt-4 sm:mt-0 w-full sm:w-auto">
+          <div className="relative w-full sm:w-72">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Search className="h-5 w-5 text-slate-400" />
+              <Search className="h-4 w-4 text-slate-400" />
             </div>
             <input
               type="text"
-              className="pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none w-full sm:w-64 shadow-sm transition-all"
-              placeholder="Search SKU or description..."
+              className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none w-full text-sm font-medium shadow-sm transition-all"
+              placeholder="Tìm theo SKU hoặc tên..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -113,53 +241,66 @@ export default function InventoryPage() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-left border-collapse text-sm">
             <thead>
-              <tr className="bg-white border-b border-slate-100 text-slate-500 text-xs uppercase tracking-wider">
-                <th className="py-4 px-6 font-semibold">Account</th>
-                <th className="py-4 px-6 font-semibold">SKU Code</th>
-                <th className="py-4 px-6 font-semibold">Description</th>
-                <th className="py-4 px-6 font-semibold text-right">Quantity Balance</th>
-                <th className="py-4 px-6 font-semibold text-center">Status</th>
-                <th className="py-4 px-6 font-semibold text-center">Action</th>
+              <tr className="bg-slate-50/70 border-b border-slate-200 text-slate-500 text-xs uppercase tracking-wider font-semibold">
+                <th className="py-4 px-6">Account</th>
+                <th className="py-4 px-6">Mã SKU</th>
+                <th className="py-4 px-6">Tên Sản Phẩm (Mô Tả)</th>
+                <th className="py-4 px-6 text-right">Số Lượng Tồn</th>
+                <th className="py-4 px-6 text-right">Tỷ Trọng (%)</th>
+                <th className="py-4 px-6 text-center">Trạng Thái</th>
+                <th className="py-4 px-6 text-center">Điều Chỉnh</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-100 font-medium">
               {filteredData.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-500 font-medium">
-                    No inventory records found matching your search.
+                  <td colSpan={7} className="py-12 text-center text-slate-400">
+                    Không tìm thấy sản phẩm nào trong kho.
                   </td>
                 </tr>
               ) : (
-                filteredData.map((item, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50/50 transition-colors group">
-                    <td className="py-4 px-6 text-slate-500 font-medium">{item.account}</td>
-                    <td className="py-4 px-6 text-slate-900 font-bold">{item.sku}</td>
-                    <td className="py-4 px-6 text-slate-600 font-medium max-w-md truncate" title={item.descr}>{item.descr}</td>
-                    <td className="py-4 px-6 text-right">
-                      <span className="text-lg font-black text-slate-800">{item.quantity}</span>
-                    </td>
-                    <td className="py-4 px-6 text-center">
-                      {item.quantity <= 10 ? (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-700">
-                          <AlertCircle className="w-3 h-3 mr-1" /> Low Stock
+                filteredData.map((item, idx) => {
+                  const share = totalStock > 0 ? ((item.quantity / totalStock) * 100).toFixed(1) : 0;
+                  return (
+                    <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
+                      <td className="py-4 px-6 text-slate-500 text-xs">{item.account}</td>
+                      <td className="py-4 px-6 font-bold text-slate-900">{item.sku}</td>
+                      <td className="py-4 px-6 text-slate-700 max-w-md truncate" title={item.descr}>
+                        {item.descr}
+                      </td>
+                      <td className="py-4 px-6 text-right">
+                        <span className="text-base font-black text-slate-900">
+                          {item.quantity.toLocaleString()}
                         </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">
-                          In Stock
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-4 px-6 text-center">
-                      {currentUser?.role === "ADMIN" && (
-                        <button onClick={() => openEditModal(item)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
-                          <Edit className="w-5 h-5" />
+                      </td>
+                      <td className="py-4 px-6 text-right text-slate-500 font-semibold">
+                        {share}%
+                      </td>
+                      <td className="py-4 px-6 text-center">
+                        {item.quantity <= 1000 ? (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                            Cần Bổ Sung
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <CheckCircle2 className="w-3 h-3 mr-1" /> Sẵn Sàng
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-4 px-6 text-center">
+                        <button
+                          onClick={() => openEditModal(item)}
+                          className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors"
+                          title="Điều chỉnh số lượng kho"
+                        >
+                          <Edit className="w-4 h-4" />
                         </button>
-                      )}
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -168,51 +309,51 @@ export default function InventoryPage() {
 
       {/* Edit Modal */}
       {isModalOpen && selectedSku && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="text-xl font-bold text-slate-800">Adjust Stock</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+              <h3 className="text-xl font-bold text-slate-800">Điều Chỉnh Tồn Kho</h3>
+              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-6 h-6" />
               </button>
             </div>
             
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-semibold text-slate-500 mb-1">SKU</label>
-                <div className="text-lg font-bold text-slate-900">{selectedSku.sku} <span className="text-sm font-medium text-slate-400">({selectedSku.account})</span></div>
-                <div className="text-sm text-slate-500 truncate">{selectedSku.descr}</div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Mặt Hàng</label>
+                <div className="text-base font-bold text-slate-900">{selectedSku.sku}</div>
+                <div className="text-xs text-slate-500 truncate">{selectedSku.descr}</div>
               </div>
               
               <div className="flex gap-4">
                 <div className="flex-1">
-                  <label className="block text-sm font-semibold text-slate-500 mb-2">Current Qty</label>
-                  <input type="text" readOnly value={selectedSku.quantity} className="w-full px-4 py-3 bg-slate-100 border-transparent rounded-xl text-slate-500 font-bold outline-none cursor-not-allowed" />
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Tồn Hiện Tại</label>
+                  <input type="text" readOnly value={selectedSku.quantity.toLocaleString()} className="w-full px-4 py-2.5 bg-slate-100 rounded-xl text-slate-500 font-bold outline-none" />
                 </div>
                 <div className="flex-1">
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">New Qty <span className="text-red-500">*</span></label>
-                  <input type="number" value={newQuantity} onChange={e => setNewQuantity(e.target.value)} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-bold text-slate-900 outline-none transition-all" placeholder="0" />
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Tồn Mới (*)</label>
+                  <input type="number" value={newQuantity} onChange={e => setNewQuantity(e.target.value)} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 font-bold text-slate-900 outline-none" placeholder="0" />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Reason for adjustment <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Lý Do Điều Chỉnh (*)</label>
                 <textarea 
                   value={adjustReason} 
                   onChange={e => setAdjustReason(e.target.value)}
-                  className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all resize-none" 
+                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none resize-none text-sm" 
                   rows={3}
-                  placeholder="E.g., Stock count discrepancy, damaged item..."
+                  placeholder="Kiểm kê thực tế, hàng hỏng, điều chuyển..."
                 />
               </div>
             </div>
 
             <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
-              <button onClick={() => setIsModalOpen(false)} className="px-5 py-2.5 text-slate-600 font-semibold hover:bg-slate-200 rounded-xl transition-colors">
-                Cancel
+              <button onClick={() => setIsModalOpen(false)} className="px-5 py-2.5 text-slate-600 font-semibold hover:bg-slate-200 rounded-xl text-sm">
+                Hủy Bỏ
               </button>
-              <button onClick={handleAdjust} disabled={isAdjusting || !newQuantity || !adjustReason} className="flex items-center px-5 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50">
-                {isAdjusting ? "Saving..." : <><Save className="w-4 h-4 mr-2" /> Confirm Edit</>}
+              <button onClick={handleAdjust} disabled={isAdjusting || !newQuantity || !adjustReason} className="flex items-center px-5 py-2.5 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 text-sm disabled:opacity-50">
+                {isAdjusting ? "Đang lưu..." : <><Save className="w-4 h-4 mr-2" /> Lưu Thay Đổi</>}
               </button>
             </div>
           </div>
