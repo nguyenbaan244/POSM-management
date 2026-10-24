@@ -36,7 +36,7 @@ export async function GET(request: Request) {
       skuCount: meta.skus.size,
       totalQty: meta.totalQty
     }));
-    const availableBaselineDates = availableBaselineFiles.map(f => f.date);
+    const availableBaselineDates = availableBaselineFiles.map(f => f.date).sort();
 
     // 2. Fetch available latest snapshot files with metadata
     const latestRows = await prisma.latestInventorySnapshot.findMany({
@@ -62,11 +62,18 @@ export async function GET(request: Request) {
       skuCount: meta.skus.size,
       totalQty: meta.totalQty
     }));
-    const availableLatestDates = availableLatestFiles.map(f => f.date);
+    const availableLatestDates = availableLatestFiles.map(f => f.date).sort().reverse();
 
-    // Determine target dates
-    const targetBaselineDateStr = baselineDateParam || availableBaselineDates[0] || "2026-10-01";
-    const targetLatestDateStr = latestDateParam || availableLatestDates[0] || "2026-10-23";
+    // Determine target dates from valid available files
+    let targetBaselineDateStr = (baselineDateParam || "").trim();
+    if (!targetBaselineDateStr || !availableBaselineDates.includes(targetBaselineDateStr)) {
+      targetBaselineDateStr = availableBaselineDates.length > 0 ? availableBaselineDates[availableBaselineDates.length - 1] : "2026-10-22";
+    }
+
+    let targetLatestDateStr = (latestDateParam || "").trim();
+    if (!targetLatestDateStr || !availableLatestDates.includes(targetLatestDateStr)) {
+      targetLatestDateStr = availableLatestDates.length > 0 ? availableLatestDates[0] : "2026-10-23";
+    }
 
     const baselineDateStart = new Date(`${targetBaselineDateStr}T00:00:00.000Z`);
     const latestDateEnd = new Date(`${targetLatestDateStr}T23:59:59.999Z`);

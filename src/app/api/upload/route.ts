@@ -395,7 +395,7 @@ export async function POST(request: Request) {
         const r = rows[i];
         const sku = String(getRowValue(r, "Sku", "SKU", "sku", "Mã hàng", "MaHang") || "").trim();
         const descr = String(getRowValue(r, "DESCR", "Description", "descr", "description", "Tên hàng", "TenHang") || "").trim();
-        const batch = String(getRowValue(r, "Batch", "BATCH", "batch", "Lot", "LOT", "BatchNo", "Số lô") || "Chưa rõ").trim();
+        const batch = String(getRowValue(r, "BatchNo", "Batch No", "Batch_No", "Batch", "BATCH", "batch", "Số lô") || "Chưa rõ").trim();
         const qty = Number(getRowValue(r, "Qty", "Quantity", "quantity", "Qty Piece", "Total Qty Pcs", "Số lượng", "SoLuong") || 0);
 
         if (!sku) continue;
@@ -500,7 +500,7 @@ export async function POST(request: Request) {
         const r = rows[i];
         const sku = String(getRowValue(r, "Sku", "SKU", "sku", "Mã hàng", "MaHang") || "").trim();
         const descr = String(getRowValue(r, "DESCR", "Description", "descr", "description", "Tên hàng", "TenHang") || "").trim();
-        const batch = String(getRowValue(r, "Batch", "BATCH", "batch", "Lot", "LOT", "BatchNo", "Số lô") || "Chưa rõ").trim();
+        const batch = String(getRowValue(r, "BatchNo", "Batch No", "Batch_No", "Batch", "BATCH", "batch", "Số lô") || "Chưa rõ").trim();
         const qty = Number(getRowValue(r, "Qty", "Quantity", "quantity", "Qty Piece", "Total Qty Pcs", "Số lượng", "SoLuong") || 0);
         const mfg = getRowValue(r, "MfgDate", "MFG", "mfgDate", "Manufacture Date") ? String(getRowValue(r, "MfgDate", "MFG", "mfgDate", "Manufacture Date")).trim() : undefined;
         const exp = getRowValue(r, "ExpDate", "EXP", "expDate", "ExpiryDate") ? String(getRowValue(r, "ExpDate", "EXP", "expDate", "ExpiryDate")).trim() : undefined;

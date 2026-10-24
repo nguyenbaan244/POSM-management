@@ -19,8 +19,8 @@ import { exportToExcel } from "@/lib/excelExport";
 export default function CheckLechTonPage() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [baselineDate, setBaselineDate] = useState<string>("2026-10-01");
-  const [latestDate, setLatestDate] = useState<string>("2026-10-23");
+  const [baselineDate, setBaselineDate] = useState<string>("");
+  const [latestDate, setLatestDate] = useState<string>("");
   const [viewMode, setViewMode] = useState<"sku" | "batch">("sku");
   const [filter, setFilter] = useState<"all" | "discrepancy" | "match">("all");
   const [search, setSearch] = useState("");
@@ -39,8 +39,12 @@ export default function CheckLechTonPage() {
       .then(resData => {
         if (resData.success) {
           setData(resData);
-          if (!baselineDate && resData.baselineDate) setBaselineDate(resData.baselineDate);
-          if (!latestDate && resData.latestDate) setLatestDate(resData.latestDate);
+          if (resData.baselineDate && (!baselineDate || !resData.availableBaselineDates?.includes(baselineDate))) {
+            setBaselineDate(resData.baselineDate);
+          }
+          if (resData.latestDate && (!latestDate || !resData.availableLatestDates?.includes(latestDate))) {
+            setLatestDate(resData.latestDate);
+          }
         } else {
           toast.error(resData.error || "Không thể tải dữ liệu đối soát");
         }
@@ -350,7 +354,7 @@ export default function CheckLechTonPage() {
                 }`}
               >
                 <Box className="w-3.5 h-3.5 mr-1.5 text-emerald-600" />
-                Chi Tiết Theo Lô ({summary.totalBatches})
+                Chi Tiết Theo Lô (BatchNo) ({summary.totalBatches})
               </button>
             </div>
 
@@ -410,7 +414,7 @@ export default function CheckLechTonPage() {
                 <th className="py-3.5 px-4">Mã SKU</th>
                 <th className="py-3.5 px-4">Tên Sản Phẩm</th>
                 {viewMode === "batch" && (
-                  <th className="py-3.5 px-4">Số Lô (Batch)</th>
+                  <th className="py-3.5 px-4">Số Lô (BatchNo)</th>
                 )}
                 <th className="py-3.5 px-4 text-right">Tồn Cũ ({baselineDate})</th>
                 <th className="py-3.5 px-4 text-right text-blue-600">(+) Nhập</th>
