@@ -473,65 +473,145 @@ export default function UploadDataPage() {
           {/* Success / Discrepancy Banner */}
           {uploadResult && (
             <div
-              className={`mt-6 p-6 rounded-2xl border flex flex-col md:flex-row items-start justify-between gap-4 animate-in ${
+              className={`mt-6 p-6 rounded-3xl border transition-all animate-in fade-in duration-300 ${
                 uploadResult.isMatched === false
-                  ? "bg-amber-50 border-amber-300 text-amber-900"
-                  : "bg-emerald-50 border-emerald-200 text-emerald-900"
+                  ? "bg-rose-50/70 border-rose-300 text-rose-950 shadow-lg shadow-rose-900/5"
+                  : uploadResult.isMatched === true
+                  ? "bg-emerald-50/80 border-emerald-300 text-emerald-950 shadow-lg shadow-emerald-900/5"
+                  : "bg-slate-50 border-slate-200 text-slate-800"
               }`}
             >
-              <div className="flex items-start space-x-4">
-                {uploadResult.isMatched === false ? (
-                  <AlertTriangle className="w-7 h-7 text-amber-600 shrink-0 mt-0.5" />
-                ) : (
-                  <CheckCircle2 className="w-7 h-7 text-emerald-600 shrink-0 mt-0.5" />
-                )}
-                <div>
-                  <h4 className="text-base font-bold">
-                    {uploadResult.isMatched === false
-                      ? "Đã lưu tồn kho - Phát hiện chênh lệch so với lịch sử!"
-                      : "Xử lý file hoàn tất thành công!"}
-                  </h4>
-                  <p className="text-sm mt-1">{uploadResult.message}</p>
-                  <div className="flex flex-wrap gap-4 mt-3 text-xs font-semibold">
-                    {uploadResult.importedCount !== undefined && (
-                      <span>Số bản ghi mới thêm: {uploadResult.importedCount}</span>
-                    )}
-                    {uploadResult.skippedCount !== undefined && (
-                      <span className="text-slate-600">Đã có sẵn (bỏ qua): {uploadResult.skippedCount}</span>
-                    )}
-                    {uploadResult.totalQty !== undefined && (
-                      <span>Tổng số lượng: {uploadResult.totalQty?.toLocaleString()}</span>
+              <div className="flex flex-col md:flex-row items-start justify-between gap-4">
+                <div className="flex items-start space-x-4">
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-sm ${
+                    uploadResult.isMatched === false
+                      ? "bg-rose-600 text-white"
+                      : uploadResult.isMatched === true
+                      ? "bg-emerald-600 text-white"
+                      : "bg-blue-600 text-white"
+                  }`}>
+                    {uploadResult.isMatched === false ? (
+                      <AlertTriangle className="w-6 h-6" />
+                    ) : uploadResult.isMatched === true ? (
+                      <CheckCircle2 className="w-6 h-6" />
+                    ) : (
+                      <CheckCircle2 className="w-6 h-6" />
                     )}
                   </div>
+                  <div>
+                    <h4 className="text-lg font-black tracking-tight">
+                      {uploadResult.isMatched === false
+                        ? `CẢNH BÁO: Phát hiện lệch tồn so với hệ thống ghi nhận ngày ${uploadResult.snapshotDate || ""}`
+                        : uploadResult.isMatched === true
+                        ? `XÁC THỰC THÀNH CÔNG: Tồn kho khớp 100% với hệ thống ghi nhận ngày ${uploadResult.snapshotDate || ""}`
+                        : "Xử lý file hoàn tất thành công!"}
+                    </h4>
+                    <p className="text-sm mt-1 text-slate-700 leading-relaxed font-medium">
+                      {uploadResult.message}
+                    </p>
 
-                  {/* Discrepancy Details Preview */}
-                  {uploadResult.discrepancies && uploadResult.discrepancies.length > 0 && (
-                    <div className="mt-4 p-3 bg-white/80 rounded-xl border border-amber-200 text-xs">
-                      <p className="font-bold text-amber-900 mb-1">
-                        Chi tiết các mã SKU bị lệch ({uploadResult.discrepancies.length} SKU):
-                      </p>
-                      <ul className="space-y-1 text-slate-700">
-                        {uploadResult.discrepancies.slice(0, 5).map((d: any, idx: number) => (
-                          <li key={idx} className="flex justify-between max-w-md">
-                            <span className="font-semibold">{d.sku} ({d.descr}):</span>
-                            <span>
-                              Tải lên: <b>{d.uploaded.toLocaleString()}</b> | Tính toán: <b>{d.expected.toLocaleString()}</b> | Lệch: <b className="text-rose-600">{d.variance > 0 ? `+${d.variance.toLocaleString()}` : d.variance.toLocaleString()}</b>
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
+                    {/* Stats Pill Badges */}
+                    <div className="flex flex-wrap gap-2.5 mt-3 text-xs font-bold">
+                      {uploadResult.importedCount !== undefined && (
+                        <span className="px-3 py-1 bg-white/90 rounded-xl border border-slate-200/80 text-slate-700 shadow-sm">
+                          Mã SKU: {uploadResult.importedCount}
+                        </span>
+                      )}
+                      {uploadResult.batchCount !== undefined && (
+                        <span className="px-3 py-1 bg-white/90 rounded-xl border border-slate-200/80 text-slate-700 shadow-sm">
+                          Số Lô: {uploadResult.batchCount}
+                        </span>
+                      )}
+                      {uploadResult.totalQty !== undefined && (
+                        <span className="px-3 py-1 bg-white/90 rounded-xl border border-slate-200/80 text-slate-900 shadow-sm">
+                          Tồn File Tải Lên: {uploadResult.totalQty?.toLocaleString()} chiếc
+                        </span>
+                      )}
+                      {(uploadResult.totalSystemQty !== undefined || uploadResult.totalExpectedQty !== undefined) && (
+                        <span className="px-3 py-1 bg-white/90 rounded-xl border border-slate-200/80 text-slate-900 shadow-sm">
+                          Hệ Thống Ghi Nhận: {(uploadResult.totalSystemQty || uploadResult.totalExpectedQty)?.toLocaleString()} chiếc
+                        </span>
+                      )}
+                      {uploadResult.netVariance !== undefined && (
+                        <span className={`px-3 py-1 rounded-xl border shadow-sm ${
+                          uploadResult.netVariance === 0
+                            ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                            : "bg-rose-100 text-rose-800 border-rose-300"
+                        }`}>
+                          Chênh Lệch Tổng: {uploadResult.netVariance >= 0 ? `+${uploadResult.netVariance.toLocaleString()}` : uploadResult.netVariance.toLocaleString()} chiếc
+                        </span>
+                      )}
                     </div>
-                  )}
+                  </div>
                 </div>
+
+                {(uploadResult.format === "inventory" || uploadResult.format === "baseline-inventory") && (
+                  <Link
+                    href={`/check-lech-ton?baselineDate=${baselineDate}&latestDate=${snapshotDate}`}
+                    className={`px-5 py-2.5 text-white font-bold rounded-2xl text-xs flex items-center shadow-md shrink-0 transition-all active:scale-95 ${
+                      uploadResult.isMatched === false
+                        ? "bg-rose-600 hover:bg-rose-700 hover:shadow-rose-500/20"
+                        : "bg-slate-900 hover:bg-slate-800 hover:shadow-slate-900/20"
+                    }`}
+                  >
+                    <Scale className="w-4 h-4 mr-1.5" />
+                    Xem Bảng Check Lệch Tồn <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
+                  </Link>
+                )}
               </div>
 
-              {uploadResult.isMatched === false && (
-                <Link
-                  href="/check-lech-ton"
-                  className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs flex items-center shadow-md shrink-0 transition-colors"
-                >
-                  Đối Soát Chi Tiết <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
-                </Link>
+              {/* Discrepancy Details Table */}
+              {uploadResult.discrepancies && uploadResult.discrepancies.length > 0 && (
+                <div className="mt-5 pt-5 border-t border-rose-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <h5 className="text-xs font-black uppercase tracking-wider text-rose-900 flex items-center">
+                      <AlertTriangle className="w-4 h-4 mr-1.5 text-rose-600" />
+                      Chi tiết sai ở đâu ({uploadResult.discrepancies.length} mã SKU bị lệch):
+                    </h5>
+                    <span className="text-[11px] text-rose-700 font-medium">
+                      Đối chiếu trực tiếp giữa file tải lên và số liệu hệ thống tính toán
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto rounded-2xl border border-rose-200 bg-white shadow-sm">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-rose-50/80 text-rose-900 border-b border-rose-200 font-bold uppercase tracking-wider text-[11px]">
+                          <th className="py-2.5 px-3">Mã SKU</th>
+                          <th className="py-2.5 px-3">Tên Sản Phẩm</th>
+                          <th className="py-2.5 px-3 text-right">File Tải Lên</th>
+                          <th className="py-2.5 px-3 text-right">Hệ Thống Ghi Nhận</th>
+                          <th className="py-2.5 px-3 text-right">Chênh Lệch</th>
+                          <th className="py-2.5 px-3">Đánh Giá Sai Ở Đâu</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-rose-100 font-medium text-slate-700">
+                        {uploadResult.discrepancies.map((d: any, idx: number) => (
+                          <tr key={idx} className="hover:bg-rose-50/40 transition-colors">
+                            <td className="py-2 px-3 font-bold text-slate-900">{d.sku}</td>
+                            <td className="py-2 px-3 max-w-xs truncate" title={d.descr}>{d.descr}</td>
+                            <td className="py-2 px-3 text-right font-black text-slate-900">
+                              {Number(d.uploaded).toLocaleString()}
+                            </td>
+                            <td className="py-2 px-3 text-right font-bold text-slate-600">
+                              {Number(d.expected).toLocaleString()}
+                            </td>
+                            <td className="py-2 px-3 text-right font-black">
+                              <span className={`inline-block px-2 py-0.5 rounded-lg text-xs font-bold ${
+                                d.variance > 0 ? "bg-blue-100 text-blue-800" : "bg-rose-100 text-rose-800"
+                              }`}>
+                                {d.variance > 0 ? `+${d.variance.toLocaleString()}` : d.variance.toLocaleString()}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-xs text-rose-700 font-medium">
+                              {d.reason}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               )}
             </div>
           )}

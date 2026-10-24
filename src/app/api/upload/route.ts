@@ -267,10 +267,12 @@ export async function POST(request: Request) {
     // 3. TỒN KHO CŨ / TỒN ĐẦU KỲ (Baseline Inventory - Thay thế Danh mục SKU)
     // ==========================================
     } else if (format === "baseline-inventory" || format === "master-data") {
-      const baselineDate = snapshotDateParam ? new Date(snapshotDateParam) : new Date("2026-10-01");
+      const baselineDateStr = snapshotDateParam || "2026-10-01";
+      const baselineDate = new Date(`${baselineDateStr}T00:00:00.000Z`);
       const dateYMD = toYMD(baselineDate);
 
       // Aggregation maps
+      const skuMap = new Map<string, { sku: string, descr: string, quantity: number }>();
       const batchMap = new Map<string, { sku: string, descr: string, batch: string, quantity: number }>();
 
       for (let i = 0; i < rows.length; i++) {
@@ -282,6 +284,15 @@ export async function POST(request: Request) {
 
         if (!sku) continue;
 
+        // SKU level aggregation
+        if (!skuMap.has(sku)) {
+          skuMap.set(sku, { sku, descr: descr || sku, quantity: 0 });
+        }
+        const sItem = skuMap.get(sku)!;
+        sItem.quantity += qty;
+        if (descr && sItem.descr === sku) sItem.descr = descr;
+
+        // Batch level aggregation
         const key = `${sku}__${batch}`;
         if (!batchMap.has(key)) {
           batchMap.set(key, { sku, descr: descr || sku, batch, quantity: 0 });
@@ -291,7 +302,63 @@ export async function POST(request: Request) {
         if (descr && item.descr === sku) item.descr = descr;
       }
 
-      // Clear existing baseline for this date and insert fresh
+      for (const item of skuMap.values()) {
+        totalQty += item.quantity;
+      }
+
+      // ========================================================
+      // KIỂM TRA ĐỐI SOÁT VỚI HỆ THỐNG ĐANG GHI NHẬN TẠI NGÀY ĐÓ
+      // ========================================================
+      // Phương pháp: Tính ngược từ tồn kho hiện tại và các giao dịch nhập/xuất phát sinh sau ngày chốt tồn cũ
+      const currentBatches = await prisma.inventoryBatch.findMany();
+      const inAfter = await prisma.inbound.findMany({
+        where: { reversed: false, date: { gt: new Date(`${dateYMD}T23:59:59.999Z`) } }
+      });
+      const outAfter = await prisma.outbound.findMany({
+        where: { reversed: false, date: { gt: new Date(`${dateYMD}T23:59:59.999Z`) } }
+      });
+
+      const sysStockOnDate = new Map<string, number>();
+      currentBatches.forEach(b => sysStockOnDate.set(b.sku, (sysStockOnDate.get(b.sku) || 0) + b.quantity));
+      inAfter.forEach(i => sysStockOnDate.set(i.sku, (sysStockOnDate.get(i.sku) || 0) - i.quantity));
+      outAfter.forEach(o => sysStockOnDate.set(o.sku, (sysStockOnDate.get(o.sku) || 0) + o.quantity));
+
+      // Hoặc nếu đã có sẵn BaselineInventory cũ trong DB tại ngày này, đối chiếu cả với baseline cũ
+      const existingBaseline = await prisma.baselineInventory.findMany({
+        where: { date: baselineDate, account: "Danone" }
+      });
+      const existingBaseMap = new Map<string, number>();
+      existingBaseline.forEach(b => existingBaseMap.set(b.sku, (existingBaseMap.get(b.sku) || 0) + b.quantity));
+
+      // Chọn nguồn đối soát của hệ thống: ưu tiên tính từ giao dịch (back-calculate), nếu không có giao dịch thì dùng baseline cũ
+      const hasTransactions = inAfter.length > 0 || outAfter.length > 0 || currentBatches.length > 0;
+      const systemRecordedMap = (hasTransactions && sysStockOnDate.size > 0) ? sysStockOnDate : existingBaseMap;
+
+      const discrepancies: any[] = [];
+      const allCheckSkus = new Set([...skuMap.keys(), ...systemRecordedMap.keys()]);
+      let totalSystemQty = 0;
+
+      for (const sku of allCheckSkus) {
+        const uploaded = skuMap.get(sku)?.quantity || 0;
+        const expected = systemRecordedMap.get(sku) || 0;
+        totalSystemQty += expected;
+        const diff = uploaded - expected;
+
+        if (diff !== 0 && systemRecordedMap.size > 0) {
+          discrepancies.push({
+            sku,
+            descr: skuMap.get(sku)?.descr || sku,
+            uploaded,
+            expected,
+            variance: diff,
+            reason: diff > 0
+              ? `Tồn file tải lên cao hơn hệ thống đang ghi nhận (+${diff.toLocaleString()} chiếc)`
+              : `Tồn file tải lên thấp hơn hệ thống đang ghi nhận (${diff.toLocaleString()} chiếc)`
+          });
+        }
+      }
+
+      // Lưu/Cập nhật vào bảng BaselineInventory
       await prisma.baselineInventory.deleteMany({
         where: { date: baselineDate, account: "Danone" }
       });
@@ -309,9 +376,8 @@ export async function POST(request: Request) {
         await prisma.baselineInventory.createMany({ data: recordsToInsert.slice(i, i + 50) });
       }
 
-      // Also upsert to masterData so descriptions are permanently available
-      for (const item of batchMap.values()) {
-        totalQty += item.quantity;
+      // Cập nhật MasterData
+      for (const item of skuMap.values()) {
         await prisma.masterData.upsert({
           where: { sku_account: { sku: item.sku, account: "Danone" } },
           update: { descr: item.descr },
@@ -319,23 +385,36 @@ export async function POST(request: Request) {
         });
       }
 
-      importedCount = batchMap.size;
-      await logAction("UPLOAD_BASELINE_INVENTORY", `Đã lưu tồn kho cũ / đầu kỳ ngày ${dateYMD}: ${importedCount} mục (Tổng SL: ${totalQty})`);
+      importedCount = skuMap.size;
+      const isMatched = discrepancies.length === 0;
+
+      await logAction(
+        "UPLOAD_BASELINE_INVENTORY",
+        `Đã lưu tồn kho cũ ngày ${dateYMD}: ${importedCount} SKUs (${batchMap.size} lô, Tổng SL: ${totalQty}). Khớp hệ thống: ${isMatched ? "100% KHỚP" : `LỆCH ${discrepancies.length} SKU`}`
+      );
 
       return NextResponse.json({
         success: true,
         format: "baseline-inventory",
         snapshotDate: dateYMD,
         importedCount,
+        batchCount: batchMap.size,
         totalQty,
-        message: `Đã thiết lập thành công Tồn kho cũ / Tồn đầu kỳ ngày ${dateYMD}: ${importedCount} mã SKU/Lô. Tổng số lượng: ${totalQty.toLocaleString()} chiếc.`
+        totalSystemQty,
+        netVariance: totalQty - totalSystemQty,
+        isMatched,
+        discrepancies,
+        message: isMatched
+          ? `Tồn kho cũ ngày ${dateYMD} đã tải lên thành công và KHỚP 100% với hệ thống đang ghi nhận! (${totalQty.toLocaleString()} chiếc)`
+          : `Đã lưu tồn kho cũ ngày ${dateYMD}. CẢNH BÁO: Phát hiện ${discrepancies.length} mã SKU có số lượng KHÔNG KHỚP với hệ thống đang ghi nhận tại ngày ${dateYMD}! Hãy kiểm tra chi tiết bảng đối soát bên dưới.`
       });
 
     // ==========================================
     // 4. TỒN KHO MỚI NHẤT (Latest Inventory - Không bắt buộc & Có kiểm tra lệch tồn)
     // ==========================================
     } else if (format === "inventory") {
-      const snapshotDate = snapshotDateParam ? new Date(snapshotDateParam) : new Date();
+      const snapshotDateStr = snapshotDateParam || "2026-10-23";
+      const snapshotDate = new Date(`${snapshotDateStr}T00:00:00.000Z`);
       const dateYMD = toYMD(snapshotDate);
 
       const skuAgg = new Map<string, { sku: string, descr: string, quantity: number }>();
@@ -370,7 +449,87 @@ export async function POST(request: Request) {
         if (descr && bItem.descr === sku) bItem.descr = descr;
       }
 
-      // 1. Save to LatestInventorySnapshot
+      for (const item of skuAgg.values()) {
+        totalQty += item.quantity;
+      }
+
+      // ========================================================
+      // KIỂM TRA ĐỐI SOÁT VỚI HỆ THỐNG: TỒN CŨ + NHẬP - XUẤT = TỒN MỚI
+      // ========================================================
+      // 1. Tìm bản ghi tồn cũ (Baseline) gần nhất trước hoặc bằng ngày này
+      const baselineRecords = await prisma.baselineInventory.findMany({
+        where: { date: { lte: new Date(`${dateYMD}T23:59:59.999Z`) } },
+        orderBy: { date: "desc" }
+      });
+
+      const baselineDate = baselineRecords.length > 0 ? baselineRecords[0].date : null;
+      const baselineMap = new Map<string, number>();
+
+      if (baselineDate) {
+        for (const b of baselineRecords) {
+          if (toYMD(b.date) === toYMD(baselineDate)) {
+            baselineMap.set(b.sku, (baselineMap.get(b.sku) || 0) + b.quantity);
+          }
+        }
+      }
+
+      // 2. Lấy dữ liệu Nhập và Xuất từ ngày baselineDate đến ngày snapshotDate
+      const inbounds = await prisma.inbound.findMany({
+        where: {
+          reversed: false,
+          date: baselineDate
+            ? { gte: baselineDate, lte: new Date(`${dateYMD}T23:59:59.999Z`) }
+            : { lte: new Date(`${dateYMD}T23:59:59.999Z`) }
+        }
+      });
+
+      const outbounds = await prisma.outbound.findMany({
+        where: {
+          reversed: false,
+          date: baselineDate
+            ? { gte: baselineDate, lte: new Date(`${dateYMD}T23:59:59.999Z`) }
+            : { lte: new Date(`${dateYMD}T23:59:59.999Z`) }
+        }
+      });
+
+      // 3. Tính tồn dự kiến theo công thức: Tồn Tính Toán = Tồn cũ + Nhập - Xuất
+      const expectedMap = new Map<string, number>();
+      for (const [sku, baseQty] of baselineMap.entries()) {
+        expectedMap.set(sku, baseQty);
+      }
+      for (const ib of inbounds) {
+        expectedMap.set(ib.sku, (expectedMap.get(ib.sku) || 0) + ib.quantity);
+      }
+      for (const ob of outbounds) {
+        expectedMap.set(ob.sku, (expectedMap.get(ob.sku) || 0) - ob.quantity);
+      }
+
+      // 4. So sánh số tồn file mới với tồn tính toán
+      const discrepancies: any[] = [];
+      const checkedSkus = new Set([...skuAgg.keys(), ...expectedMap.keys()]);
+      let totalExpectedQty = 0;
+
+      for (const sku of checkedSkus) {
+        const uploaded = skuAgg.get(sku)?.quantity || 0;
+        const expected = expectedMap.get(sku) || 0;
+        totalExpectedQty += expected;
+        const diff = uploaded - expected;
+
+        if (diff !== 0 && baselineDate) {
+          discrepancies.push({
+            sku,
+            descr: skuAgg.get(sku)?.descr || sku,
+            uploaded,
+            expected,
+            variance: diff,
+            reason: diff > 0
+              ? `Tồn mới cao hơn tính toán (+${diff.toLocaleString()} chiếc). Khả năng thiếu chứng từ xuất hoặc nhập thừa.`
+              : `Tồn mới thấp hơn tính toán (${diff.toLocaleString()} chiếc). Khả năng thiếu chứng từ nhập hoặc có hao hụt.`
+          });
+        }
+      }
+
+      // 5. Lưu vào LatestInventorySnapshot
       await prisma.latestInventorySnapshot.deleteMany({
         where: { date: snapshotDate, account: "Danone" }
       });
@@ -388,12 +547,11 @@ export async function POST(request: Request) {
         await prisma.latestInventorySnapshot.createMany({ data: snapshotList.slice(i, i + 50) });
       }
 
-      // 2. Update active inventory
+      // 6. Cập nhật bảng Inventory & InventoryBatch hiện hành
       await prisma.inventory.deleteMany({});
       await prisma.inventoryBatch.deleteMany({});
 
       for (const item of skuAgg.values()) {
-        totalQty += item.quantity;
         await prisma.inventory.create({
           data: {
             sku: item.sku,
@@ -423,90 +581,29 @@ export async function POST(request: Request) {
         });
       }
 
-      // 3. AUTOMATIC VALIDATION: Check uploaded inventory against historical system calculated inventory!
-      // Fetch latest baseline or opening stock before this date
-      const baselineRecords = await prisma.baselineInventory.findMany({
-        where: { date: { lte: snapshotDate } },
-        orderBy: { date: "desc" }
-      });
-
-      const baselineDate = baselineRecords.length > 0 ? baselineRecords[0].date : null;
-      const baselineMap = new Map<string, number>(); // sku -> qty
-
-      if (baselineDate) {
-        for (const b of baselineRecords) {
-          if (b.date.getTime() === baselineDate.getTime()) {
-            baselineMap.set(b.sku, (baselineMap.get(b.sku) || 0) + b.quantity);
-          }
-        }
-      }
-
-      // Inbounds & Outbounds up to snapshotDate
-      const inbounds = await prisma.inbound.findMany({
-        where: {
-          reversed: false,
-          date: baselineDate ? { gte: baselineDate, lte: snapshotDate } : { lte: snapshotDate }
-        }
-      });
-
-      const outbounds = await prisma.outbound.findMany({
-        where: {
-          reversed: false,
-          date: baselineDate ? { gte: baselineDate, lte: snapshotDate } : { lte: snapshotDate }
-        }
-      });
-
-      // Calculate expected quantity for each SKU
-      const expectedMap = new Map<string, number>();
-      for (const [sku, baseQty] of baselineMap.entries()) {
-        expectedMap.set(sku, baseQty);
-      }
-      for (const ib of inbounds) {
-        expectedMap.set(ib.sku, (expectedMap.get(ib.sku) || 0) + ib.quantity);
-      }
-      for (const ob of outbounds) {
-        expectedMap.set(ob.sku, (expectedMap.get(ob.sku) || 0) - ob.quantity);
-      }
-
-      // Compare Uploaded vs Calculated
-      const discrepancies: any[] = [];
-      const checkedSkus = new Set([...skuAgg.keys(), ...expectedMap.keys()]);
-
-      for (const sku of checkedSkus) {
-        const uploaded = skuAgg.get(sku)?.quantity || 0;
-        const expected = expectedMap.get(sku) || 0;
-        const diff = uploaded - expected;
-        if (diff !== 0 && baselineDate) {
-          discrepancies.push({
-            sku,
-            descr: skuAgg.get(sku)?.descr || sku,
-            uploaded,
-            expected,
-            variance: diff
-          });
-        }
-      }
-
       importedCount = skuAgg.size;
       const isMatched = discrepancies.length === 0;
 
       await logAction(
         "UPLOAD_INVENTORY",
-        `Đã tải lên tồn kho ngày ${dateYMD} (${importedCount} SKUs, Tổng SL: ${totalQty}). Trạng thái khớp lệnh: ${isMatched ? "KHỚP 100%" : `LỆCH ${discrepancies.length} SKU`}`
+        `Đã tải lên tồn kho ngày ${dateYMD} (${importedCount} SKUs, ${batchAgg.size} lô, Tổng SL: ${totalQty}). Khớp hệ thống: ${isMatched ? "100% KHỚP" : `LỆCH ${discrepancies.length} SKU`}`
       );
 
       return NextResponse.json({
         success: true,
         format,
         snapshotDate: dateYMD,
+        baselineDateUsed: baselineDate ? toYMD(baselineDate) : null,
         importedCount,
         batchCount: batchAgg.size,
         totalQty,
+        totalExpectedQty,
+        netVariance: totalQty - totalExpectedQty,
         isMatched,
         discrepancies,
         message: isMatched
           ? `Tồn kho ngày ${dateYMD} đã tải lên thành công và KHỚP 100% với dữ liệu nhập xuất lịch sử! (${totalQty.toLocaleString()} chiếc)`
-          : `Đã lưu tồn kho ngày ${dateYMD}. CẢNH BÁO: Phát hiện ${discrepancies.length} mã SKU có số lượng LỆCH so với dữ liệu nhập xuất lịch sử tính đến ngày ${dateYMD}! Hãy xem tab 'Check lệch tồn' để đối soát chi tiết.`
+          : `Đã lưu tồn kho ngày ${dateYMD}. CẢNH BÁO: Phát hiện ${discrepancies.length} mã SKU có số lượng LỆCH so với dữ liệu nhập xuất lịch sử tính đến ngày ${dateYMD}! Hãy kiểm tra chi tiết bảng đối soát bên dưới.`
       });
     }
 

@@ -5,15 +5,13 @@ import {
   Scale, 
   Search, 
   Calendar, 
-  Filter, 
   FileDown, 
   CheckCircle2, 
   AlertTriangle, 
   RefreshCw, 
-  ArrowDownToLine, 
-  ArrowUpFromLine, 
-  Boxes,
-  HelpCircle
+  HelpCircle,
+  Layers,
+  Box
 } from "lucide-react";
 import { toast } from "sonner";
 import { exportToExcel } from "@/lib/excelExport";
@@ -23,6 +21,7 @@ export default function CheckLechTonPage() {
   const [loading, setLoading] = useState(true);
   const [baselineDate, setBaselineDate] = useState<string>("2026-10-01");
   const [latestDate, setLatestDate] = useState<string>("2026-10-23");
+  const [viewMode, setViewMode] = useState<"sku" | "batch">("sku");
   const [filter, setFilter] = useState<"all" | "discrepancy" | "match">("all");
   const [search, setSearch] = useState("");
 
@@ -31,6 +30,7 @@ export default function CheckLechTonPage() {
     const params = new URLSearchParams();
     if (baselineDate) params.append("baselineDate", baselineDate);
     if (latestDate) params.append("latestDate", latestDate);
+    if (viewMode) params.append("viewMode", viewMode);
     if (filter !== "all") params.append("filter", filter);
     if (search) params.append("search", search);
 
@@ -55,13 +55,16 @@ export default function CheckLechTonPage() {
 
   useEffect(() => {
     fetchReconciliation();
-  }, [baselineDate, latestDate, filter, search]);
+  }, [baselineDate, latestDate, viewMode, filter, search]);
 
   const items = data?.items || [];
   const summary = data?.summary || {
-    totalItems: 0,
-    matchedCount: 0,
-    discrepancyCount: 0,
+    totalSkus: 0,
+    totalBatches: 0,
+    skuMatchedCount: 0,
+    skuDiscrepancyCount: 0,
+    batchMatchedCount: 0,
+    batchDiscrepancyCount: 0,
     totalOld: 0,
     totalIn: 0,
     totalOut: 0,
@@ -70,37 +73,61 @@ export default function CheckLechTonPage() {
     netVariance: 0
   };
 
+  const availableBaselineFiles = data?.availableBaselineFiles || [];
+  const availableLatestFiles = data?.availableLatestFiles || [];
+
+  const matchedCount = viewMode === "sku" ? summary.skuMatchedCount : summary.batchMatchedCount;
+  const discrepancyCount = viewMode === "sku" ? summary.skuDiscrepancyCount : summary.batchDiscrepancyCount;
+  const totalItemCount = viewMode === "sku" ? summary.totalSkus : summary.totalBatches;
+
   const handleExportExcel = () => {
     if (!items || items.length === 0) {
       toast.error("Không có dữ liệu để xuất");
       return;
     }
 
+    const isBatch = viewMode === "batch";
+    const exportColumns = isBatch
+      ? [
+          { header: "Mã SKU", key: "sku", width: 14 },
+          { header: "Tên Sản Phẩm", key: "descr", width: 38 },
+          { header: "Số Lô (Batch)", key: "batch", width: 18 },
+          { header: `Tồn Cũ (${baselineDate})`, key: "oldQty", width: 16, format: (v: any) => Number(v).toLocaleString() },
+          { header: "(+) Nhập Trong Kỳ", key: "inQty", width: 16, format: (v: any) => (Number(v) > 0 ? `+${Number(v).toLocaleString()}` : "-") },
+          { header: "(-) Xuất Trong Kỳ", key: "outQty", width: 16, format: (v: any) => (Number(v) > 0 ? `-${Number(v).toLocaleString()}` : "-") },
+          { header: "(=) Tồn Tính Toán (Sổ Sách)", key: "calculatedQty", width: 22, format: (v: any) => Number(v).toLocaleString() },
+          { header: `Tồn Thực Tế Tải Lên (${latestDate})`, key: "actualQty", width: 22, format: (v: any) => Number(v).toLocaleString() },
+          { header: "Chênh Lệch (+/-)", key: "variance", width: 16, format: (v: any) => (Number(v) > 0 ? `+${Number(v).toLocaleString()}` : Number(v).toLocaleString()) },
+          { header: "Trạng Thái", key: "statusText", width: 20 },
+          { header: "Đánh Giá Sai Ở Đâu", key: "reason", width: 45 }
+        ]
+      : [
+          { header: "Mã SKU", key: "sku", width: 14 },
+          { header: "Tên Sản Phẩm", key: "descr", width: 38 },
+          { header: `Tồn Cũ (${baselineDate})`, key: "oldQty", width: 16, format: (v: any) => Number(v).toLocaleString() },
+          { header: "(+) Tổng Nhập Trong Kỳ", key: "inQty", width: 18, format: (v: any) => (Number(v) > 0 ? `+${Number(v).toLocaleString()}` : "-") },
+          { header: "(-) Tổng Xuất Trong Kỳ", key: "outQty", width: 18, format: (v: any) => (Number(v) > 0 ? `-${Number(v).toLocaleString()}` : "-") },
+          { header: "(=) Tồn Tính Toán (Sổ Sách)", key: "calculatedQty", width: 24, format: (v: any) => Number(v).toLocaleString() },
+          { header: `Tồn Thực Tế Tải Lên (${latestDate})`, key: "actualQty", width: 24, format: (v: any) => Number(v).toLocaleString() },
+          { header: "Chênh Lệch (+/-)", key: "variance", width: 16, format: (v: any) => (Number(v) > 0 ? `+${Number(v).toLocaleString()}` : Number(v).toLocaleString()) },
+          { header: "Trạng Thái", key: "statusText", width: 20 },
+          { header: "Đánh Giá Sai Ở Đâu", key: "reason", width: 45 }
+        ];
+
     exportToExcel({
-      filename: `Doi_Soat_Lech_Ton_${baselineDate}_den_${latestDate}.xlsx`,
-      sheetName: "Check_Lech_Ton",
-      title: "BẢNG ĐỐI SOÁT CHÊNH LỆCH TỒN KHO THEO SKU & LÔ SẢN XUẤT (DANONE LOGISTICS)",
+      filename: `Doi_Soat_Lech_Ton_${viewMode.toUpperCase()}_${baselineDate}_den_${latestDate}.xlsx`,
+      sheetName: isBatch ? "Lech_Ton_Theo_Lo" : "Lech_Ton_Theo_SKU",
+      title: `BẢNG ĐỐI SOÁT CHÊNH LỆCH TỒN KHO ${isBatch ? "CHI TIẾT THEO LÔ" : "TỔNG HỢP THEO SKU"} (DANONE LOGISTICS)`,
       subtitles: [
-        `Khoảng thời gian: Từ ngày ${baselineDate} (Tồn cũ) đến ngày ${latestDate} (Tồn mới)`,
-        `Tổng số mục: ${summary.totalItems} | Số mục khớp: ${summary.matchedCount} | Số mục bị lệch: ${summary.discrepancyCount} | Tổng chênh lệch: ${summary.netVariance >= 0 ? `+${summary.netVariance.toLocaleString()}` : summary.netVariance.toLocaleString()} chiếc`,
+        `Khoảng thời gian: Từ ngày ${baselineDate} (File tồn cũ) đến ngày ${latestDate} (File tồn mới)`,
+        `Chế độ xem: ${isBatch ? "Chi tiết theo Lô (Batch)" : "Tổng hợp theo SKU"} | Số mục: ${totalItemCount} | Khớp: ${matchedCount} | Lệch: ${discrepancyCount} | Tổng chênh lệch: ${summary.netVariance >= 0 ? `+${summary.netVariance.toLocaleString()}` : summary.netVariance.toLocaleString()} chiếc`,
         `Thời gian xuất: ${new Date().toLocaleString("vi-VN")}`
       ],
       data: items,
-      columns: [
-        { header: "Mã SKU", key: "sku", width: 14 },
-        { header: "Tên Sản Phẩm", key: "descr", width: 38 },
-        { header: "Số Lô (Batch)", key: "batch", width: 18 },
-        { header: `Tồn Cũ (${baselineDate})`, key: "oldQty", width: 16, format: v => Number(v).toLocaleString() },
-        { header: "(+) Nhập Trong Kỳ", key: "inQty", width: 16, format: v => (Number(v) > 0 ? `+${Number(v).toLocaleString()}` : "-") },
-        { header: "(-) Xuất Trong Kỳ", key: "outQty", width: 16, format: v => (Number(v) > 0 ? `-${Number(v).toLocaleString()}` : "-") },
-        { header: "(=) Tồn Tính Toán (Sổ Sách)", key: "calculatedQty", width: 22, format: v => Number(v).toLocaleString() },
-        { header: `Tồn Thực Tế Tải Lên (${latestDate})`, key: "actualQty", width: 22, format: v => Number(v).toLocaleString() },
-        { header: "Chênh Lệch (+/-)", key: "variance", width: 16, format: v => (Number(v) > 0 ? `+${Number(v).toLocaleString()}` : Number(v).toLocaleString()) },
-        { header: "Trạng Thái Khớp Lệnh", key: "statusText", width: 24 }
-      ]
+      columns: exportColumns
     });
 
-    toast.success("Đã xuất file Excel đối soát thành công!");
+    toast.success(`Đã xuất file Excel đối soát ${isBatch ? "theo Lô" : "theo SKU"} thành công!`);
   };
 
   return (
@@ -116,7 +143,7 @@ export default function CheckLechTonPage() {
               Check Lệch Tồn Kho
             </h1>
             <p className="text-slate-500 font-medium">
-              Đối soát tồn kho cũ + SKU/Batch nhập - SKU/Batch xuất so với tồn kho mới nhất
+              Chỉ lấy số tồn file cũ + nhập - xuất và so sánh trực tiếp với số tồn file mới
             </p>
           </div>
         </div>
@@ -140,55 +167,100 @@ export default function CheckLechTonPage() {
         </div>
       </div>
 
-      {/* Date Selectors & Info Banner */}
+      {/* Date Selectors & Formula Banner */}
       <div className="bg-white p-6 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 mb-8">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
             {/* Baseline Date Selector */}
             <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center">
-                <Calendar className="w-3.5 h-3.5 mr-1.5 text-blue-600" />
-                Ngày Tồn Kho Cũ (Baseline / Đầu Kỳ)
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center justify-between">
+                <span className="flex items-center">
+                  <Calendar className="w-3.5 h-3.5 mr-1.5 text-blue-600" />
+                  File Tồn Kho Cũ (Đầu Kỳ)
+                </span>
+                {availableBaselineFiles.length > 0 && (
+                  <span className="text-[11px] text-blue-600 font-normal">
+                    {availableBaselineFiles.length} file đã upload
+                  </span>
+                )}
               </label>
-              <input
-                type="date"
-                value={baselineDate}
-                onChange={(e) => setBaselineDate(e.target.value)}
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-              />
+
+              {availableBaselineFiles.length > 0 ? (
+                <select
+                  value={baselineDate}
+                  onChange={(e) => setBaselineDate(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                >
+                  {availableBaselineFiles.map((f: any, idx: number) => (
+                    <option key={idx} value={f.date}>
+                      Ngày {f.date} ({f.skuCount} SKU, {f.totalQty.toLocaleString()} chiếc)
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="date"
+                  value={baselineDate}
+                  onChange={(e) => setBaselineDate(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              )}
               <span className="text-[11px] text-slate-400 mt-1 block">
-                Căn cứ tồn kho ban đầu để bắt đầu cộng dồn nhập/xuất
+                Căn cứ số dư tồn ban đầu để tính toán (+ Nhập - Xuất)
               </span>
             </div>
 
             {/* Latest Date Selector */}
             <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center">
-                <Calendar className="w-3.5 h-3.5 mr-1.5 text-emerald-600" />
-                Ngày Tồn Kho Mới (Kiểm Kê / Đối Soát)
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center justify-between">
+                <span className="flex items-center">
+                  <Calendar className="w-3.5 h-3.5 mr-1.5 text-emerald-600" />
+                  File Tồn Kho Mới (Kiểm Kê / Đối Soát)
+                </span>
+                {availableLatestFiles.length > 0 && (
+                  <span className="text-[11px] text-emerald-600 font-normal">
+                    {availableLatestFiles.length} file đã upload
+                  </span>
+                )}
               </label>
-              <input
-                type="date"
-                value={latestDate}
-                onChange={(e) => setLatestDate(e.target.value)}
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-              />
+
+              {availableLatestFiles.length > 0 ? (
+                <select
+                  value={latestDate}
+                  onChange={(e) => setLatestDate(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                >
+                  {availableLatestFiles.map((f: any, idx: number) => (
+                    <option key={idx} value={f.date}>
+                      Ngày {f.date} ({f.skuCount} SKU, {f.totalQty.toLocaleString()} chiếc)
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="date"
+                  value={latestDate}
+                  onChange={(e) => setLatestDate(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              )}
               <span className="text-[11px] text-slate-400 mt-1 block">
-                Dữ liệu tồn kho thực tế kiểm kê tại thời điểm này
+                Số tồn thực tế trong file tồn mới để so sánh trực tiếp
               </span>
             </div>
           </div>
 
-          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/80 max-w-sm">
-            <div className="flex items-start space-x-3 text-xs text-slate-600">
+          {/* Formula Callout */}
+          <div className="bg-emerald-50/70 p-4 rounded-2xl border border-emerald-200 max-w-sm">
+            <div className="flex items-start space-x-3 text-xs text-slate-700">
               <HelpCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
               <div>
-                <p className="font-bold text-slate-800">Công thức đối soát:</p>
-                <p className="mt-0.5 text-slate-600">
-                  <span className="font-semibold text-slate-900">Tồn Tính Toán</span> = Tồn cũ + Nhập - Xuất (theo SKU & Lô).
+                <p className="font-bold text-emerald-950">Công thức chuẩn:</p>
+                <p className="mt-0.5 text-slate-700">
+                  <span className="font-bold text-slate-900">(=) Tồn Tính Toán</span> = Tồn file cũ + Nhập trong kỳ - Xuất trong kỳ.
                 </p>
-                <p className="mt-0.5 text-slate-600">
-                  <span className="font-semibold text-slate-900">Chênh Lệch</span> = Tồn Thực Tế - Tồn Tính Toán.
+                <p className="mt-0.5 text-slate-700">
+                  <span className="font-bold text-slate-900">Chênh Lệch</span> = Tồn file mới - Tồn Tính Toán.
                 </p>
               </div>
             </div>
@@ -199,22 +271,26 @@ export default function CheckLechTonPage() {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
         <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.03)]">
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Tổng Số Mục (SKU + Lô)</p>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">
+            {viewMode === "sku" ? "Tổng Số SKU Kiểm Tra" : "Tổng Số Lô Kiểm Tra"}
+          </p>
           <h3 className="text-2xl font-black text-slate-800">
-            {summary.totalItems}
+            {totalItemCount}
           </h3>
-          <span className="text-[11px] text-slate-400 font-medium">Cặp SKU - Batch kiểm tra</span>
+          <span className="text-[11px] text-slate-400 font-medium">
+            {viewMode === "sku" ? "Mã hàng SKU" : "Cặp SKU - Batch"}
+          </span>
         </div>
 
         <div className="bg-white p-5 rounded-3xl border border-emerald-100 shadow-[0_8px_30px_rgb(16,185,129,0.06)] relative overflow-hidden">
           <div className="absolute -right-2 -bottom-2 w-16 h-16 bg-emerald-50 rounded-full pointer-events-none" />
           <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider mb-1 flex items-center">
-            <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Khớp Hoàn Toàn (0)
+            <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Khớp 100%
           </p>
           <h3 className="text-2xl font-black text-emerald-700">
-            {summary.matchedCount}
+            {matchedCount}
           </h3>
-          <span className="text-[11px] text-emerald-500 font-medium">Khớp chuẩn 100%</span>
+          <span className="text-[11px] text-emerald-500 font-medium">Chính xác tuyệt đối</span>
         </div>
 
         <div className="bg-white p-5 rounded-3xl border border-rose-100 shadow-[0_8px_30px_rgb(244,63,94,0.06)] relative overflow-hidden">
@@ -223,7 +299,7 @@ export default function CheckLechTonPage() {
             <AlertTriangle className="w-3.5 h-3.5 mr-1" /> Bị Lệch Tồn
           </p>
           <h3 className="text-2xl font-black text-rose-700">
-            {summary.discrepancyCount}
+            {discrepancyCount}
           </h3>
           <span className="text-[11px] text-rose-500 font-medium">Cần kiểm tra lại</span>
         </div>
@@ -241,7 +317,7 @@ export default function CheckLechTonPage() {
           <h3 className="text-2xl font-black text-emerald-400">
             {summary.totalActual.toLocaleString()}
           </h3>
-          <span className="text-[11px] text-slate-400 font-medium">
+          <span className="text-[11px] text-slate-300 font-medium">
             Lệch: {summary.netVariance >= 0 ? `+${summary.netVariance.toLocaleString()}` : summary.netVariance.toLocaleString()} chiếc
           </span>
         </div>
@@ -249,40 +325,67 @@ export default function CheckLechTonPage() {
 
       {/* Main Table Container */}
       <div className="bg-white rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 overflow-hidden mb-8">
-        {/* Table Filter Header */}
+        {/* Table Filter Header & View Mode Switch */}
         <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div className="flex items-center space-x-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* View Mode Toggle */}
+            <div className="flex bg-slate-200/80 p-1 rounded-2xl mr-2">
+              <button
+                onClick={() => setViewMode("sku")}
+                className={`flex items-center px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  viewMode === "sku"
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5 mr-1.5 text-blue-600" />
+                Tổng Hợp Theo SKU ({summary.totalSkus})
+              </button>
+              <button
+                onClick={() => setViewMode("batch")}
+                className={`flex items-center px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  viewMode === "batch"
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <Box className="w-3.5 h-3.5 mr-1.5 text-emerald-600" />
+                Chi Tiết Theo Lô ({summary.totalBatches})
+              </button>
+            </div>
+
+            {/* Status Filters */}
             <button
               onClick={() => setFilter("all")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
                 filter === "all"
                   ? "bg-slate-900 text-white shadow-sm"
                   : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
               }`}
             >
-              Tất Cả ({summary.totalItems})
+              Tất Cả ({totalItemCount})
             </button>
             <button
               onClick={() => setFilter("discrepancy")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center ${
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center ${
                 filter === "discrepancy"
                   ? "bg-rose-600 text-white shadow-sm"
                   : "bg-white text-rose-700 border border-rose-200 hover:bg-rose-50"
               }`}
             >
-              <AlertTriangle className="w-3.5 h-3.5 mr-1.5" />
-              Chỉ Xem Bị Lệch ({summary.discrepancyCount})
+              <AlertTriangle className="w-3.5 h-3.5 mr-1" />
+              Chỉ Xem Lệch ({discrepancyCount})
             </button>
             <button
               onClick={() => setFilter("match")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center ${
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center ${
                 filter === "match"
                   ? "bg-emerald-600 text-white shadow-sm"
                   : "bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50"
               }`}
             >
-              <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
-              Khớp Hoàn Toàn ({summary.matchedCount})
+              <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+              Khớp 100% ({matchedCount})
             </button>
           </div>
 
@@ -306,27 +409,30 @@ export default function CheckLechTonPage() {
               <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-semibold">
                 <th className="py-3.5 px-4">Mã SKU</th>
                 <th className="py-3.5 px-4">Tên Sản Phẩm</th>
-                <th className="py-3.5 px-4">Số Lô (Batch)</th>
+                {viewMode === "batch" && (
+                  <th className="py-3.5 px-4">Số Lô (Batch)</th>
+                )}
                 <th className="py-3.5 px-4 text-right">Tồn Cũ ({baselineDate})</th>
                 <th className="py-3.5 px-4 text-right text-blue-600">(+) Nhập</th>
                 <th className="py-3.5 px-4 text-right text-orange-600">(-) Xuất</th>
                 <th className="py-3.5 px-4 text-right font-bold text-slate-800">(=) Tồn Tính Toán</th>
-                <th className="py-3.5 px-4 text-right font-bold text-slate-800">Tồn Thực Tế ({latestDate})</th>
+                <th className="py-3.5 px-4 text-right font-bold text-slate-800">Tồn Mới ({latestDate})</th>
                 <th className="py-3.5 px-4 text-right font-black">Chênh Lệch</th>
                 <th className="py-3.5 px-4 text-center">Trạng Thái</th>
+                <th className="py-3.5 px-4">Đánh Giá Sai Ở Đâu</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
               {loading ? (
                 <tr>
-                  <td colSpan={10} className="py-16 text-center text-slate-400">
+                  <td colSpan={viewMode === "batch" ? 11 : 10} className="py-16 text-center text-slate-400">
                     <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-emerald-600" />
-                    Đang đối soát dữ liệu SKU và Lô sản xuất...
+                    Đang đối soát dữ liệu theo công thức tồn cũ + nhập - xuất...
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-16 text-center text-slate-400">
+                  <td colSpan={viewMode === "batch" ? 11 : 10} className="py-16 text-center text-slate-400">
                     Không tìm thấy mục đối soát nào phù hợp với điều kiện tìm kiếm.
                   </td>
                 </tr>
@@ -334,24 +440,25 @@ export default function CheckLechTonPage() {
                 items.map((row: any, idx: number) => {
                   const isMatch = row.variance === 0;
                   const isOver = row.variance > 0;
-                  const isUnder = row.variance < 0;
 
                   return (
                     <tr 
                       key={idx} 
                       className={`hover:bg-slate-50 transition-colors ${
-                        !isMatch ? (isOver ? "bg-blue-50/30" : "bg-rose-50/30") : ""
+                        !isMatch ? (isOver ? "bg-blue-50/20" : "bg-rose-50/20") : ""
                       }`}
                     >
                       <td className="py-3 px-4 font-bold text-slate-900">{row.sku}</td>
                       <td className="py-3 px-4 text-slate-600 max-w-xs truncate" title={row.descr}>
                         {row.descr}
                       </td>
-                      <td className="py-3 px-4 font-semibold text-slate-700">
-                        <span className="px-2 py-0.5 bg-slate-100 rounded-md font-mono text-[11px] border border-slate-200">
-                          {row.batch}
-                        </span>
-                      </td>
+                      {viewMode === "batch" && (
+                        <td className="py-3 px-4 font-semibold text-slate-700">
+                          <span className="px-2 py-0.5 bg-slate-100 rounded-md font-mono text-[11px] border border-slate-200">
+                            {row.batch}
+                          </span>
+                        </td>
+                      )}
                       <td className="py-3 px-4 text-right text-slate-600">{row.oldQty.toLocaleString()}</td>
                       <td className="py-3 px-4 text-right text-blue-600 font-bold">
                         {row.inQty > 0 ? `+${row.inQty.toLocaleString()}` : "-"}
@@ -393,6 +500,9 @@ export default function CheckLechTonPage() {
                           </span>
                         )}
                       </td>
+                      <td className="py-3 px-4 text-slate-600 max-w-sm truncate text-[11px]" title={row.reason}>
+                        {row.reason}
+                      </td>
                     </tr>
                   );
                 })
@@ -401,7 +511,7 @@ export default function CheckLechTonPage() {
             {items.length > 0 && (
               <tfoot>
                 <tr className="bg-slate-900 text-white font-bold text-xs">
-                  <td colSpan={3} className="py-3.5 px-4 text-sm font-black">
+                  <td colSpan={viewMode === "batch" ? 3 : 2} className="py-3.5 px-4 text-sm font-black">
                     TỔNG CỘNG TOÀN BỘ KHO
                   </td>
                   <td className="py-3.5 px-4 text-right text-slate-300">
@@ -423,7 +533,10 @@ export default function CheckLechTonPage() {
                     {summary.netVariance >= 0 ? `+${summary.netVariance.toLocaleString()}` : summary.netVariance.toLocaleString()}
                   </td>
                   <td className="py-3.5 px-4 text-center">
-                    {summary.discrepancyCount === 0 ? "Khớp Toàn Bộ" : `Lệch ${summary.discrepancyCount} mục`}
+                    {discrepancyCount === 0 ? "Khớp Toàn Bộ" : `Lệch ${discrepancyCount} mục`}
+                  </td>
+                  <td className="py-3.5 px-4 text-slate-400 text-[11px]">
+                    {discrepancyCount === 0 ? "Số liệu hoàn toàn chính xác" : "Cần rà soát các mục bị lệch"}
                   </td>
                 </tr>
               </tfoot>
