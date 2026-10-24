@@ -10,16 +10,56 @@ function parseExcelDate(serial: any): Date {
     const utc_value = utc_days * 86400;
     return new Date(utc_value * 1000);
   }
+  if (serial instanceof Date) {
+    return new Date(Date.UTC(serial.getFullYear(), serial.getMonth(), serial.getDate()));
+  }
   if (typeof serial === "string") {
     const s = serial.trim();
-    // Check format DD/MM/YYYY or DD-MM-YYYY
-    const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+    // Format YYYY-MM-DD or YYYY/MM/DD
+    const iso = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+    if (iso) {
+      return new Date(Date.UTC(parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10)));
+    }
+    // Delimited date DD-MM-YYYY or MM/DD/YYYY
+    const dmy = s.match(/^(\d{1,2})([\/\-])(\d{1,2})[\/\-](\d{4})/);
     if (dmy) {
-      return new Date(parseInt(dmy[3], 10), parseInt(dmy[2], 10) - 1, parseInt(dmy[1], 10));
+      const p1 = parseInt(dmy[1], 10);
+      const sep = dmy[2];
+      const p2 = parseInt(dmy[3], 10);
+      const year = parseInt(dmy[4], 10);
+      let day: number, month: number;
+      if (p1 > 12) {
+        day = p1; month = p2;
+      } else if (p2 > 12) {
+        day = p2; month = p1;
+      } else if (sep === "/") {
+        // MM/DD/YYYY
+        month = p1; day = p2;
+      } else {
+        // DD-MM-YYYY
+        day = p1; month = p2;
+      }
+      return new Date(Date.UTC(year, month - 1, day));
     }
   }
   const d = new Date(serial);
-  return isNaN(d.getTime()) ? new Date() : d;
+  return isNaN(d.getTime()) ? new Date() : new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+}
+
+function getRowValue(row: any, ...candidates: string[]): any {
+  if (!row) return "";
+  for (const c of candidates) {
+    if (row[c] !== undefined && row[c] !== null && row[c] !== "") return row[c];
+  }
+  const rowKeys = Object.keys(row);
+  for (const c of candidates) {
+    const cClean = c.trim().toLowerCase();
+    const foundKey = rowKeys.find(k => k.trim().toLowerCase() === cClean);
+    if (foundKey && row[foundKey] !== undefined && row[foundKey] !== null && row[foundKey] !== "") {
+      return row[foundKey];
+    }
+  }
+  return "";
 }
 
 const toYMD = (d: Date) => d.toISOString().split("T")[0];
@@ -57,50 +97,65 @@ export async function POST(request: Request) {
       // Load all existing inbounds for deduplication
       const existingInbounds = await prisma.inbound.findMany({
         where: { reversed: false },
-        select: { date: true, orderCode: true, sku: true, quantity: true, batch: true }
+        select: { date: true, orderCode: true, sku: true, quantity: true, batch: true, remark: true }
       });
 
-      const existingSet = new Set<string>();
+      // Frequency map of existing records in DB (supports multiset deduplication)
+      const dbCounts = new Map<string, number>();
       for (const ib of existingInbounds) {
-        const key = `${toYMD(new Date(ib.date))}|${ib.orderCode.trim().toLowerCase()}|${ib.sku.trim().toLowerCase()}|${ib.quantity}|${(ib.batch || "").trim().toLowerCase()}`;
-        existingSet.add(key);
+        const toIdMatch = ib.remark?.match(/\[TOID:([^\]]+)\]/);
+        const key = toIdMatch 
+          ? `TOID|${toIdMatch[1].trim()}` 
+          : `${toYMD(new Date(ib.date))}|${ib.orderCode.trim().toLowerCase()}|${ib.sku.trim().toLowerCase()}|${ib.quantity}|${(ib.batch || "").trim().toLowerCase()}`;
+        dbCounts.set(key, (dbCounts.get(key) || 0) + 1);
       }
 
       const newRecords: any[] = [];
 
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i];
-        const sku = String(r["Sku"] || r["SKU"] || r["sku"] || "").trim();
-        const descr = String(r["DESCR"] || r["Description"] || r["descr"] || "").trim();
-        const qty = Number(r["Qty Piece"] || r["Quantity"] || r["Qty"] || r["quantity"] || 0);
-        const poNumber = r["PO Number"] || r["PONumber"] || r["PO"] || "";
-        const receiptKey = r["ReceiptKey"] || r["Receipt Key"] || "";
-        const orderCode = String(poNumber || receiptKey || `IB_${Date.now()}_${i + 1}`).trim();
-        const rawDate = r["Date Received"] || r["Date"] || r["date"];
+        const sku = String(getRowValue(r, "Sku", "SKU", "sku", "Mã hàng", "MaHang") || "").trim();
+        const descr = String(getRowValue(r, "DESCR", "Description", "descr", "description", "Tên hàng", "TenHang") || "").trim();
+        // Priority: "Qty Piece" is the piece/each unit in WMS inbound reports
+        const qtyRaw = getRowValue(r, "Qty Piece", "Quantity", "Qty", "quantity", "Total Qty Pcs", "Số lượng", "SoLuong");
+        const qty = Number(qtyRaw || 0);
+        const poNumber = String(getRowValue(r, "PO Number", "PONumber", "PO") || "").trim();
+        const receiptKey = String(getRowValue(r, "ReceiptKey", "Receipt Key") || "").trim();
+        const toId = String(getRowValue(r, "ToId", "To ID", "Pallet ID", "PalletID") || "").trim();
+        const orderCode = String(poNumber || receiptKey || (toId ? `PALLET_${toId}` : `IB_${Date.now()}_${i + 1}`)).trim();
+        const rawDate = getRowValue(r, "Date Received", "DateReceived", "Date", "date", "Ngày nhập", "NgayNhap", "Date Closed");
         const date = parseExcelDate(rawDate);
-        const supplier = r["Supplier"] || r["supplier"] || "";
-        const batch = String(r["Batch"] || r["batch"] || "").trim();
-        const status = String(r["Status"] || "NORMAL");
-        const remark = [
-          supplier ? `NCC: ${supplier}` : "",
-          batch ? `Lô: ${batch}` : "",
-          receiptKey ? `Receipt: ${receiptKey}` : ""
-        ].filter(Boolean).join(" | ");
+        const supplier = String(getRowValue(r, "Supplier", "supplier", "Nhà cung cấp") || "").trim();
+        const batch = String(getRowValue(r, "Batch", "batch", "Lottable06", "Lot") || "").trim();
+        const status = String(getRowValue(r, "Status", "status") || "NORMAL").trim();
+        const fullRemark = String(getRowValue(r, "Remark", "remark", "Ghi chú") || "").trim();
 
         if (!sku || isNaN(qty) || qty <= 0) {
           errors.push(`Dòng ${i + 2}: SKU hoặc số lượng không hợp lệ (${qty})`);
           continue;
         }
 
-        const rowKey = `${toYMD(date)}|${orderCode.toLowerCase()}|${sku.toLowerCase()}|${qty}|${batch.toLowerCase()}`;
+        const key = toId 
+          ? `TOID|${toId}` 
+          : `${toYMD(date)}|${orderCode.toLowerCase()}|${sku.toLowerCase()}|${qty}|${batch.toLowerCase()}`;
 
-        if (existingSet.has(rowKey)) {
-          // Record already exists in DB -> skip!
+        const existingCount = dbCounts.get(key) || 0;
+        if (existingCount > 0) {
+          // Record already exists in DB from a previous upload -> skip
+          dbCounts.set(key, existingCount - 1);
           skippedCount++;
         } else {
-          // New record -> add
-          existingSet.add(rowKey); // prevent duplicate rows inside the same uploaded file
+          // New record -> add! (Never drop sibling pallets within the same upload)
           totalQty += qty;
+          const remark = [
+            toId ? `[TOID:${toId}]` : "",
+            poNumber ? `PO: ${poNumber}` : "",
+            supplier ? `NCC: ${supplier}` : "",
+            batch ? `Lô: ${batch}` : "",
+            receiptKey ? `Receipt: ${receiptKey}` : "",
+            fullRemark
+          ].filter(Boolean).join(" | ");
+
           newRecords.push({
             orderCode,
             account: "Danone",
@@ -123,30 +178,50 @@ export async function POST(request: Request) {
         await prisma.inbound.createMany({ data: chunk });
       }
 
-      // Update inventory and batch stock for new records
+      // Aggregate stock changes by SKU and by Batch before DB upserts
+      const inSkuDelta = new Map<string, { descr: string, qty: number }>();
+      const inBatchDelta = new Map<string, { sku: string, descr: string, batch: string, qty: number }>();
+
       for (const item of newRecords) {
-        await prisma.inventory.upsert({
-          where: { sku_account: { sku: item.sku, account: "Danone" } },
-          update: { quantity: { increment: item.quantity }, descr: item.descr },
-          create: { sku: item.sku, account: "Danone", descr: item.descr, quantity: item.quantity }
-        });
-        await prisma.masterData.upsert({
-          where: { sku_account: { sku: item.sku, account: "Danone" } },
-          update: { descr: item.descr },
-          create: { sku: item.sku, account: "Danone", descr: item.descr }
-        });
+        if (!inSkuDelta.has(item.sku)) {
+          inSkuDelta.set(item.sku, { descr: item.descr, qty: 0 });
+        }
+        inSkuDelta.get(item.sku)!.qty += item.quantity;
+        if (item.descr && item.descr !== item.sku) inSkuDelta.get(item.sku)!.descr = item.descr;
 
         if (item.batch) {
-          await prisma.inventoryBatch.upsert({
-            where: { sku_account_batch: { sku: item.sku, account: "Danone", batch: item.batch } },
-            update: { quantity: { increment: item.quantity }, descr: item.descr },
-            create: { sku: item.sku, account: "Danone", descr: item.descr, batch: item.batch, quantity: item.quantity }
-          });
+          const bKey = `${item.sku}__${item.batch}`;
+          if (!inBatchDelta.has(bKey)) {
+            inBatchDelta.set(bKey, { sku: item.sku, descr: item.descr, batch: item.batch, qty: 0 });
+          }
+          inBatchDelta.get(bKey)!.qty += item.quantity;
+          if (item.descr && item.descr !== item.sku) inBatchDelta.get(bKey)!.descr = item.descr;
         }
       }
 
+      for (const [sku, d] of inSkuDelta.entries()) {
+        await prisma.inventory.upsert({
+          where: { sku_account: { sku, account: "Danone" } },
+          update: { quantity: { increment: d.qty }, descr: d.descr },
+          create: { sku, account: "Danone", descr: d.descr, quantity: d.qty }
+        });
+        await prisma.masterData.upsert({
+          where: { sku_account: { sku, account: "Danone" } },
+          update: { descr: d.descr },
+          create: { sku, account: "Danone", descr: d.descr }
+        });
+      }
+
+      for (const b of inBatchDelta.values()) {
+        await prisma.inventoryBatch.upsert({
+          where: { sku_account_batch: { sku: b.sku, account: "Danone", batch: b.batch } },
+          update: { quantity: { increment: b.qty }, descr: b.descr },
+          create: { sku: b.sku, account: "Danone", descr: b.descr, batch: b.batch, quantity: b.qty }
+        });
+      }
+
       importedCount = newRecords.length;
-      await logAction("UPLOAD_INBOUND", `Đã kiểm tra file nhập kho: Thêm mới ${importedCount} dòng, Đã có sẵn ${skippedCount} dòng (bỏ qua).`);
+      await logAction("UPLOAD_INBOUND", `Đã kiểm tra file nhập kho: Thêm mới ${importedCount} dòng (+${totalQty.toLocaleString()} chiếc), Đã có sẵn ${skippedCount} dòng (bỏ qua).`);
 
       return NextResponse.json({
         success: true,
@@ -165,51 +240,66 @@ export async function POST(request: Request) {
     } else if (format === "outbound") {
       const existingOutbounds = await prisma.outbound.findMany({
         where: { reversed: false },
-        select: { date: true, orderCode: true, sku: true, quantity: true, batch: true }
+        select: { date: true, orderCode: true, sku: true, quantity: true, batch: true, remark: true }
       });
 
-      const existingSet = new Set<string>();
+      // Frequency map of existing records in DB (supports multiset deduplication)
+      const dbCounts = new Map<string, number>();
       for (const ob of existingOutbounds) {
-        const key = `${toYMD(new Date(ob.date))}|${ob.orderCode.trim().toLowerCase()}|${ob.sku.trim().toLowerCase()}|${ob.quantity}|${(ob.batch || "").trim().toLowerCase()}`;
-        existingSet.add(key);
+        const outKeyMatch = ob.remark?.match(/\[OUTKEY:([^\]]+)\]/);
+        const key = outKeyMatch 
+          ? `OUTKEY|${outKeyMatch[1].trim()}|${ob.sku.trim().toLowerCase()}|${ob.quantity}|${(ob.batch || "").trim().toLowerCase()}`
+          : `${toYMD(new Date(ob.date))}|${ob.orderCode.trim().toLowerCase()}|${ob.sku.trim().toLowerCase()}|${ob.quantity}|${(ob.batch || "").trim().toLowerCase()}`;
+        dbCounts.set(key, (dbCounts.get(key) || 0) + 1);
       }
 
       const newRecords: any[] = [];
 
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i];
-        const sku = String(r["Sku"] || r["SKU"] || r["sku"] || "").trim();
-        const descr = String(r["Description"] || r["DESCR"] || r["descr"] || "").trim();
-        const qty = Number(r["Total Qty Pcs"] || r["Quantity"] || r["Qty"] || r["quantity"] || 0);
-        const saleOrder = r["Sale Order #"] || r["Sale Order"] || r["Order Code"] || "";
-        const customerPo = r["Customer PO"] || r["CustomerPO"] || "";
-        const orderKey = r["Order Key"] || "";
-        const orderCode = String(saleOrder || customerPo || orderKey || `OB_${Date.now()}_${i + 1}`).trim();
-        const rawDate = r["ShipDate"] || r["Date"] || r["date"];
+        const sku = String(getRowValue(r, "Sku", "SKU", "sku", "Mã hàng", "MaHang") || "").trim();
+        const descr = String(getRowValue(r, "Description", "DESCR", "descr", "description", "Tên hàng", "TenHang") || "").trim();
+        // Priority: "Total Qty Pcs" is the piece/each unit in WMS outbound reports
+        const qtyRaw = getRowValue(r, "Total Qty Pcs", "Qty Piece", "Quantity", "Qty", "quantity", "Số lượng", "SoLuong");
+        const qty = Number(qtyRaw || 0);
+        const saleOrder = String(getRowValue(r, "Sale Order #", "Sale Order", "SaleOrder", "SO") || "").trim();
+        const customerPo = String(getRowValue(r, "Customer PO", "CustomerPO") || "").trim();
+        const orderKey = String(getRowValue(r, "Order Key", "OrderKey") || "").trim();
+        const palletId = String(getRowValue(r, "Pallet ID", "PalletID", "Pallet") || "").trim();
+        const redInv = String(getRowValue(r, "RED INV", "Red Inv", "RedInv") || "").trim();
+        const orderCode = String(saleOrder || customerPo || orderKey || (palletId ? `PALLET_${palletId}` : `OB_${Date.now()}_${i + 1}`)).trim();
+        const rawDate = getRowValue(r, "ShipDate", "Ship Date", "Date", "date", "Ngày xuất", "NgayXuat");
         const date = parseExcelDate(rawDate);
-        const batch = String(r["Batch"] || r["batch"] || "").trim();
-        const status = String(r["DefectiveCode"] || "NORM");
-        const fullRemark = r["Remark"] || r["remark"] || "";
-        const remark = [
-          customerPo ? `PO: ${customerPo}` : "",
-          batch ? `Lô: ${batch}` : "",
-          fullRemark
-        ].filter(Boolean).join(" | ");
+        const batch = String(getRowValue(r, "Batch", "batch", "Lot") || "").trim();
+        const status = String(getRowValue(r, "DefectiveCode", "Status", "status") || "NORM").trim();
+        const fullRemark = String(getRowValue(r, "Remark", "remark", "Ghi chú") || "").trim();
 
         if (!sku || isNaN(qty) || qty <= 0) {
           errors.push(`Dòng ${i + 2}: SKU hoặc số lượng không hợp lệ (${qty})`);
           continue;
         }
 
-        const rowKey = `${toYMD(date)}|${orderCode.toLowerCase()}|${sku.toLowerCase()}|${qty}|${batch.toLowerCase()}`;
+        const outKeyTag = [orderKey, palletId, redInv].filter(Boolean).join("|");
+        const key = outKeyTag
+          ? `OUTKEY|${outKeyTag}|${sku.toLowerCase()}|${qty}|${batch.toLowerCase()}`
+          : `${toYMD(date)}|${orderCode.toLowerCase()}|${sku.toLowerCase()}|${qty}|${batch.toLowerCase()}`;
 
-        if (existingSet.has(rowKey)) {
-          // Already in DB -> skip!
+        const existingCount = dbCounts.get(key) || 0;
+        if (existingCount > 0) {
+          // Record already exists in DB from a previous upload -> skip
+          dbCounts.set(key, existingCount - 1);
           skippedCount++;
         } else {
-          // New record -> add!
-          existingSet.add(rowKey);
+          // New record -> add! (Never drop sibling cartons/orders within the same upload)
           totalQty += qty;
+          const remark = [
+            outKeyTag ? `[OUTKEY:${outKeyTag}]` : "",
+            customerPo ? `PO: ${customerPo}` : "",
+            saleOrder ? `SO: ${saleOrder}` : "",
+            batch ? `Lô: ${batch}` : "",
+            fullRemark
+          ].filter(Boolean).join(" | ");
+
           newRecords.push({
             orderCode,
             account: "Danone",
@@ -232,25 +322,45 @@ export async function POST(request: Request) {
         await prisma.outbound.createMany({ data: chunk });
       }
 
-      // Deduct from inventory and batch stock for new records
+      // Aggregate stock changes by SKU and by Batch before DB upserts
+      const outSkuDelta = new Map<string, { descr: string, qty: number }>();
+      const outBatchDelta = new Map<string, { sku: string, descr: string, batch: string, qty: number }>();
+
       for (const item of newRecords) {
-        await prisma.inventory.upsert({
-          where: { sku_account: { sku: item.sku, account: "Danone" } },
-          update: { quantity: { decrement: item.quantity } },
-          create: { sku: item.sku, account: "Danone", descr: item.descr, quantity: 0 }
-        });
+        if (!outSkuDelta.has(item.sku)) {
+          outSkuDelta.set(item.sku, { descr: item.descr, qty: 0 });
+        }
+        outSkuDelta.get(item.sku)!.qty += item.quantity;
+        if (item.descr && item.descr !== item.sku) outSkuDelta.get(item.sku)!.descr = item.descr;
 
         if (item.batch) {
-          await prisma.inventoryBatch.upsert({
-            where: { sku_account_batch: { sku: item.sku, account: "Danone", batch: item.batch } },
-            update: { quantity: { decrement: item.quantity } },
-            create: { sku: item.sku, account: "Danone", descr: item.descr, batch: item.batch, quantity: 0 }
-          });
+          const bKey = `${item.sku}__${item.batch}`;
+          if (!outBatchDelta.has(bKey)) {
+            outBatchDelta.set(bKey, { sku: item.sku, descr: item.descr, batch: item.batch, qty: 0 });
+          }
+          outBatchDelta.get(bKey)!.qty += item.quantity;
+          if (item.descr && item.descr !== item.sku) outBatchDelta.get(bKey)!.descr = item.descr;
         }
       }
 
+      for (const [sku, d] of outSkuDelta.entries()) {
+        await prisma.inventory.upsert({
+          where: { sku_account: { sku, account: "Danone" } },
+          update: { quantity: { decrement: d.qty } },
+          create: { sku, account: "Danone", descr: d.descr, quantity: 0 }
+        });
+      }
+
+      for (const b of outBatchDelta.values()) {
+        await prisma.inventoryBatch.upsert({
+          where: { sku_account_batch: { sku: b.sku, account: "Danone", batch: b.batch } },
+          update: { quantity: { decrement: b.qty } },
+          create: { sku: b.sku, account: "Danone", descr: b.descr, batch: b.batch, quantity: 0 }
+        });
+      }
+
       importedCount = newRecords.length;
-      await logAction("UPLOAD_OUTBOUND", `Đã kiểm tra file xuất kho: Thêm mới ${importedCount} dòng, Đã có sẵn ${skippedCount} dòng (bỏ qua).`);
+      await logAction("UPLOAD_OUTBOUND", `Đã kiểm tra file xuất kho: Thêm mới ${importedCount} dòng (-${totalQty.toLocaleString()} chiếc), Đã có sẵn ${skippedCount} dòng (bỏ qua).`);
 
       return NextResponse.json({
         success: true,
@@ -283,10 +393,10 @@ export async function POST(request: Request) {
 
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i];
-        const sku = String(r["Sku"] || r["SKU"] || r["sku"] || "").trim();
-        const descr = String(r["DESCR"] || r["Description"] || r["descr"] || "").trim();
-        const batch = String(r["Batch"] || r["BATCH"] || r["batch"] || r["Lot"] || r["LOT"] || r["BatchNo"] || "Chưa rõ").trim();
-        const qty = Number(r["Qty"] || r["Quantity"] || r["quantity"] || r["Qty Piece"] || 0);
+        const sku = String(getRowValue(r, "Sku", "SKU", "sku", "Mã hàng", "MaHang") || "").trim();
+        const descr = String(getRowValue(r, "DESCR", "Description", "descr", "description", "Tên hàng", "TenHang") || "").trim();
+        const batch = String(getRowValue(r, "Batch", "BATCH", "batch", "Lot", "LOT", "BatchNo", "Số lô") || "Chưa rõ").trim();
+        const qty = Number(getRowValue(r, "Qty", "Quantity", "quantity", "Qty Piece", "Total Qty Pcs", "Số lượng", "SoLuong") || 0);
 
         if (!sku) continue;
 
@@ -388,12 +498,12 @@ export async function POST(request: Request) {
 
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i];
-        const sku = String(r["Sku"] || r["SKU"] || r["sku"] || "").trim();
-        const descr = String(r["DESCR"] || r["Description"] || r["descr"] || "").trim();
-        const batch = String(r["Batch"] || r["BATCH"] || r["batch"] || r["Lot"] || r["LOT"] || r["BatchNo"] || "Chưa rõ").trim();
-        const qty = Number(r["Qty"] || r["Quantity"] || r["quantity"] || 0);
-        const mfg = r["MfgDate"] || r["MFG"] || r["mfgDate"] ? String(r["MfgDate"] || r["MFG"] || r["mfgDate"]).trim() : undefined;
-        const exp = r["ExpDate"] || r["EXP"] || r["expDate"] ? String(r["ExpDate"] || r["EXP"] || r["expDate"]).trim() : undefined;
+        const sku = String(getRowValue(r, "Sku", "SKU", "sku", "Mã hàng", "MaHang") || "").trim();
+        const descr = String(getRowValue(r, "DESCR", "Description", "descr", "description", "Tên hàng", "TenHang") || "").trim();
+        const batch = String(getRowValue(r, "Batch", "BATCH", "batch", "Lot", "LOT", "BatchNo", "Số lô") || "Chưa rõ").trim();
+        const qty = Number(getRowValue(r, "Qty", "Quantity", "quantity", "Qty Piece", "Total Qty Pcs", "Số lượng", "SoLuong") || 0);
+        const mfg = getRowValue(r, "MfgDate", "MFG", "mfgDate", "Manufacture Date") ? String(getRowValue(r, "MfgDate", "MFG", "mfgDate", "Manufacture Date")).trim() : undefined;
+        const exp = getRowValue(r, "ExpDate", "EXP", "expDate", "ExpiryDate") ? String(getRowValue(r, "ExpDate", "EXP", "expDate", "ExpiryDate")).trim() : undefined;
 
         if (!sku) continue;
 
