@@ -176,25 +176,42 @@ export async function POST(request: Request) {
       await logAction("UPLOAD_OUTBOUND", `Uploaded ${importedCount} outbound records (${mode} mode) from ${file.name}`);
 
     } else if (format === "inventory") {
-      // Group by SKU
+      // Group by SKU and also by SKU + Batch
       const skuAgg = new Map<string, { sku: string, descr: string, quantity: number }>();
+      const batchAgg = new Map<string, { sku: string, descr: string, batch: string, quantity: number, mfgDate?: string, expDate?: string }>();
+
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i];
         const sku = String(r["Sku"] || r["SKU"] || r["sku"] || "").trim();
         const descr = String(r["DESCR"] || r["Description"] || r["descr"] || "").trim();
+        const batch = String(r["Batch"] || r["BATCH"] || r["batch"] || r["Lot"] || r["LOT"] || r["BatchNo"] || "Chưa rõ").trim();
         const qty = Number(r["Qty"] || r["Quantity"] || r["quantity"] || 0);
+        const mfg = r["MfgDate"] || r["MFG"] || r["mfgDate"] ? String(r["MfgDate"] || r["MFG"] || r["mfgDate"]).trim() : undefined;
+        const exp = r["ExpDate"] || r["EXP"] || r["expDate"] ? String(r["ExpDate"] || r["EXP"] || r["expDate"]).trim() : undefined;
 
         if (!sku) continue;
+        
+        // SKU aggregate
         if (!skuAgg.has(sku)) {
           skuAgg.set(sku, { sku, descr: descr || sku, quantity: 0 });
         }
         const item = skuAgg.get(sku)!;
         item.quantity += qty;
         if (descr && item.descr === sku) item.descr = descr;
+
+        // Batch aggregate
+        const bKey = `${sku}__${batch}`;
+        if (!batchAgg.has(bKey)) {
+          batchAgg.set(bKey, { sku, descr: descr || sku, batch, quantity: 0, mfgDate: mfg, expDate: exp });
+        }
+        const bItem = batchAgg.get(bKey)!;
+        bItem.quantity += qty;
+        if (descr && bItem.descr === sku) bItem.descr = descr;
       }
 
       if (mode === "replace") {
         await prisma.inventory.deleteMany({});
+        await prisma.inventoryBatch.deleteMany({});
       }
 
       for (const item of skuAgg.values()) {
@@ -219,8 +236,30 @@ export async function POST(request: Request) {
         });
       }
 
+      // Upsert batch items
+      for (const bItem of batchAgg.values()) {
+        await prisma.inventoryBatch.upsert({
+          where: { sku_account_batch: { sku: bItem.sku, account: "Danone", batch: bItem.batch } },
+          update: {
+            quantity: mode === "replace" ? bItem.quantity : { increment: bItem.quantity },
+            descr: bItem.descr,
+            mfgDate: bItem.mfgDate,
+            expDate: bItem.expDate
+          },
+          create: {
+            sku: bItem.sku,
+            account: "Danone",
+            descr: bItem.descr,
+            batch: bItem.batch,
+            quantity: bItem.quantity,
+            mfgDate: bItem.mfgDate,
+            expDate: bItem.expDate
+          }
+        });
+      }
+
       importedCount = skuAgg.size;
-      await logAction("UPLOAD_INVENTORY", `Uploaded inventory for ${importedCount} SKUs (${mode} mode) from ${file.name}`);
+      await logAction("UPLOAD_INVENTORY", `Uploaded inventory for ${importedCount} SKUs (${batchAgg.size} batches, ${mode} mode) from ${file.name}`);
 
     } else if (format === "master-data") {
       if (mode === "replace") {

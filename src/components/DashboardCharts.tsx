@@ -1,6 +1,6 @@
 "use client";
 
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList } from 'recharts';
 
 const COLORS = ['#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#64748b'];
 
@@ -40,7 +40,7 @@ export default function DashboardCharts({ inventoryData, activityData }: { inven
         </div>
       </div>
 
-      {/* Bar Chart for Inbound/Outbound */}
+      {/* Bar Chart for Inbound/Outbound with Quantity Labels */}
       <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
         <h3 className="text-xl font-bold text-slate-800 mb-6">Inbound vs Outbound (Top Active SKUs)</h3>
         <div className="h-80 w-full">
@@ -49,7 +49,7 @@ export default function DashboardCharts({ inventoryData, activityData }: { inven
               <BarChart
                 data={activityData}
                 margin={{
-                  top: 5,
+                  top: 25,
                   right: 30,
                   left: 20,
                   bottom: 5,
@@ -57,14 +57,28 @@ export default function DashboardCharts({ inventoryData, activityData }: { inven
               >
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                 <XAxis dataKey="name" axisLine={false} tickLine={false} />
-                <YAxis axisLine={false} tickLine={false} />
+                <YAxis axisLine={false} tickLine={false} domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.15)]} />
                 <Tooltip 
                   cursor={{fill: '#f8fafc'}}
                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
                 />
                 <Legend />
-                <Bar dataKey="Inbound" fill="#10b981" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="Outbound" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Inbound" fill="#10b981" radius={[4, 4, 0, 0]}>
+                  <LabelList 
+                    dataKey="Inbound" 
+                    position="top" 
+                    formatter={(val: any) => (val && Number(val) > 0 ? Number(val).toLocaleString() : "")}
+                    style={{ fill: "#065f46", fontSize: 10, fontWeight: 700 }}
+                  />
+                </Bar>
+                <Bar dataKey="Outbound" fill="#ef4444" radius={[4, 4, 0, 0]}>
+                  <LabelList 
+                    dataKey="Outbound" 
+                    position="top" 
+                    formatter={(val: any) => (val && Number(val) > 0 ? Number(val).toLocaleString() : "")}
+                    style={{ fill: "#991b1b", fontSize: 10, fontWeight: 700 }}
+                  />
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           ) : (

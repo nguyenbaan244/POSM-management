@@ -31,12 +31,14 @@ async function main() {
   const delInbound = await prisma.inbound.deleteMany({});
   const delOutbound = await prisma.outbound.deleteMany({});
   const delInventory = await prisma.inventory.deleteMany({});
+  const delInvBatch = await prisma.inventoryBatch.deleteMany({});
   const delMaster = await prisma.masterData.deleteMany({});
   const delLogs = await prisma.actionLog.deleteMany({});
   console.log("Deleted records:", {
     inbound: delInbound.count,
     outbound: delOutbound.count,
     inventory: delInventory.count,
+    inventoryBatch: delInvBatch.count,
     masterData: delMaster.count,
     actionLog: delLogs.count
   });
@@ -52,10 +54,14 @@ async function main() {
   const invRows = xlsx.utils.sheet_to_json(invSheet);
 
   const skuAgg = new Map();
+  const batchAgg = new Map();
   for (const r of invRows) {
     const sku = String(r['Sku'] || '').trim();
     const descr = String(r['DESCR'] || '').trim();
+    const batch = String(r['BatchNo'] || r['Batch'] || r['Lot'] || 'N/A').trim();
     const qty = Number(r['Qty'] || 0);
+    const mfgDate = excelDateToDate(r['ManufacturerDate']);
+    const expDate = excelDateToDate(r['Expiry Date']);
     if (!sku) continue;
 
     if (!skuAgg.has(sku)) {
@@ -64,6 +70,20 @@ async function main() {
     const item = skuAgg.get(sku);
     item.quantity += qty;
     if (descr && !item.descr) item.descr = descr;
+
+    const bKey = `${sku}___${batch}`;
+    if (!batchAgg.has(bKey)) {
+      batchAgg.set(bKey, {
+        sku,
+        account: 'Danone',
+        descr: descr || sku,
+        batch,
+        quantity: 0,
+        mfgDate: mfgDate ? mfgDate.toISOString().split('T')[0] : null,
+        expDate: expDate ? expDate.toISOString().split('T')[0] : null
+      });
+    }
+    batchAgg.get(bKey).quantity += qty;
   }
 
   // Also check if Inbound or Outbound have other SKUs to include in MasterData
@@ -107,6 +127,15 @@ async function main() {
     });
     console.log(`Saved SKU ${item.sku}: ${item.descr} (Stock: ${item.quantity.toLocaleString()})`);
   }
+
+  console.log(`Creating ${batchAgg.size} Inventory Batch items...`);
+  const batchList = Array.from(batchAgg.values());
+  for (let i = 0; i < batchList.length; i += 50) {
+    const chunk = batchList.slice(i, i + 50);
+    await prisma.inventoryBatch.createMany({ data: chunk });
+  }
+  console.log(`Saved ${batchList.length} Inventory Batch items.`);
+
 
   console.log("=== STEP 3: IMPORTING INBOUND DATA ===");
   console.log(`Processing ${ibRows.length} inbound rows...`);

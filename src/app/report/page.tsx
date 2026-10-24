@@ -28,7 +28,8 @@ import {
   Legend, 
   ResponsiveContainer, 
   Line, 
-  ComposedChart 
+  ComposedChart,
+  LabelList
 } from "recharts";
 
 export default function ReportPage() {
@@ -352,18 +353,32 @@ export default function ReportPage() {
           </div>
           <div className="h-72 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={dailySummary} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
+              <ComposedChart data={dailySummary} margin={{ top: 25, right: 20, left: 10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} tickLine={false} />
-                <YAxis yAxisId="left" stroke="#94a3b8" fontSize={11} tickLine={false} />
+                <YAxis yAxisId="left" stroke="#94a3b8" fontSize={11} tickLine={false} domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.15)]} />
                 <YAxis yAxisId="right" orientation="right" stroke="#10b981" fontSize={11} tickLine={false} />
                 <Tooltip
                   formatter={(value: any, name: any) => [Number(value).toLocaleString(), name]}
                   contentStyle={{ backgroundColor: "#ffffff", borderRadius: "16px", border: "1px solid #e2e8f0", boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1)" }}
                 />
                 <Legend />
-                <Bar yAxisId="left" dataKey="inbound" name="Nhập Kho" fill="#3b82f6" radius={[6, 6, 0, 0]} maxBarSize={36} />
-                <Bar yAxisId="left" dataKey="outbound" name="Xuất Kho" fill="#f97316" radius={[6, 6, 0, 0]} maxBarSize={36} />
+                <Bar yAxisId="left" dataKey="inbound" name="Nhập Kho" fill="#3b82f6" radius={[6, 6, 0, 0]} maxBarSize={36}>
+                  <LabelList 
+                    dataKey="inbound" 
+                    position="top" 
+                    formatter={(v: any) => (v && Number(v) > 0 ? Number(v).toLocaleString() : "")}
+                    style={{ fill: "#1e40af", fontSize: 10, fontWeight: 700 }}
+                  />
+                </Bar>
+                <Bar yAxisId="left" dataKey="outbound" name="Xuất Kho" fill="#f97316" radius={[6, 6, 0, 0]} maxBarSize={36}>
+                  <LabelList 
+                    dataKey="outbound" 
+                    position="top" 
+                    formatter={(v: any) => (v && Number(v) > 0 ? Number(v).toLocaleString() : "")}
+                    style={{ fill: "#c2410c", fontSize: 10, fontWeight: 700 }}
+                  />
+                </Bar>
                 <Line yAxisId="right" type="monotone" dataKey="closing" name="Tồn Cuối Ngày" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} />
               </ComposedChart>
             </ResponsiveContainer>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { 
   ArrowDownToLine, 
   Calendar, 
@@ -27,7 +27,8 @@ import {
   YAxis, 
   CartesianGrid, 
   Tooltip, 
-  ResponsiveContainer 
+  ResponsiveContainer,
+  LabelList
 } from "recharts";
 
 export default function InboundPage() {
@@ -96,9 +97,42 @@ export default function InboundPage() {
   const availableDates = inboundData?.availableDates || [];
   const availableMonths = inboundData?.availableMonths || [];
 
-  // Pagination
-  const totalPages = Math.ceil(items.length / pageSize) || 1;
-  const paginatedItems = items.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  // Group inbound details: nếu cùng ngày nhập, SKU và PO thì gom thành 1 dòng, cộng tổng số lượng lại
+  const groupedItems = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const item of items) {
+      const dateStr = item.date ? new Date(item.date).toISOString().split('T')[0] : '';
+      const poStr = (item.orderCode || '').trim();
+      const skuStr = (item.sku || '').trim();
+      const groupKey = `${dateStr}__${poStr}__${skuStr}`;
+
+      if (!map.has(groupKey)) {
+        map.set(groupKey, {
+          ...item,
+          dateStr,
+          quantity: 0,
+          subRowCount: 0,
+          remarks: new Set<string>(),
+          originalIds: [] as number[],
+        });
+      }
+
+      const g = map.get(groupKey)!;
+      g.quantity += Number(item.quantity || 0);
+      g.subRowCount += 1;
+      if (item.remark) g.remarks.add(item.remark);
+      if (item.id) g.originalIds.push(item.id);
+    }
+
+    return Array.from(map.values()).map(g => ({
+      ...g,
+      remark: Array.from(g.remarks).filter(Boolean).join("; ")
+    }));
+  }, [items]);
+
+  // Pagination based on grouped items
+  const totalPages = Math.ceil(groupedItems.length / pageSize) || 1;
+  const paginatedItems = groupedItems.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const updateRow = (index: number, field: string, value: string) => {
     const newRows = [...rows];
@@ -314,15 +348,22 @@ export default function InboundPage() {
           <p className="text-xs text-slate-500 mb-6">Biểu đồ thể hiện sản lượng nhập hàng về kho mỗi ngày</p>
           <div className="h-64 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={dailyStats}>
+              <BarChart data={dailyStats} margin={{ top: 25, right: 15, left: 10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} tickLine={false} />
-                <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} />
+                <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.15)]} />
                 <Tooltip
                   formatter={(val: any) => [`${Number(val).toLocaleString()} chiếc`, "Nhập Kho"]}
                   contentStyle={{ borderRadius: "12px", border: "1px solid #e2e8f0" }}
                 />
-                <Bar dataKey="quantity" fill="#3b82f6" radius={[6, 6, 0, 0]} maxBarSize={45} />
+                <Bar dataKey="quantity" fill="#3b82f6" radius={[6, 6, 0, 0]} maxBarSize={45}>
+                  <LabelList 
+                    dataKey="quantity" 
+                    position="top" 
+                    formatter={(val: any) => (val && Number(val) > 0 ? Number(val).toLocaleString() : "")}
+                    style={{ fill: "#1e40af", fontSize: 11, fontWeight: 700 }}
+                  />
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -416,8 +457,12 @@ export default function InboundPage() {
         <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
 
           <div>
-            <h3 className="text-lg font-bold text-slate-800">Danh Sách Chi Tiết Các Phiếu Nhập Kho</h3>
-            <p className="text-xs text-slate-500">Hiển thị {paginatedItems.length} trên tổng số {items.length} bản ghi</p>
+            <h3 className="text-lg font-bold text-slate-800">
+              Danh Sách Chi Tiết Các Phiếu Nhập Kho (Gom Theo Ngày, PO & SKU)
+            </h3>
+            <p className="text-xs text-slate-500">
+              Hiển thị {paginatedItems.length} trên tổng số {groupedItems.length} dòng đã gom (tổng hợp từ {items.length} bản ghi chi tiết)
+            </p>
           </div>
         </div>
 
@@ -429,8 +474,8 @@ export default function InboundPage() {
                 <th className="py-4 px-6">Mã Đơn / PO</th>
                 <th className="py-4 px-6">Mã SKU</th>
                 <th className="py-4 px-6">Tên Sản Phẩm</th>
-                <th className="py-4 px-6 text-right">Số Lượng</th>
-                <th className="py-4 px-6">Nhà Cung Cấp / Lô</th>
+                <th className="py-4 px-6 text-right">Tổng Số Lượng</th>
+                <th className="py-4 px-6">Ghi Chú / Lô / NCC</th>
                 <th className="py-4 px-6 text-center">Thao Tác</th>
               </tr>
             </thead>
@@ -445,7 +490,7 @@ export default function InboundPage() {
                 paginatedItems.map((item: any, idx: number) => (
                   <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
                     <td className="py-3.5 px-6 font-semibold text-slate-700 whitespace-nowrap">
-                      {new Date(item.date).toISOString().split('T')[0]}
+                      {item.dateStr || (item.date ? new Date(item.date).toISOString().split('T')[0] : "-")}
                     </td>
                     <td className="py-3.5 px-6 font-bold text-blue-700 whitespace-nowrap">
                       {item.orderCode}
@@ -456,8 +501,15 @@ export default function InboundPage() {
                     <td className="py-3.5 px-6 text-slate-600 max-w-xs truncate" title={item.descr}>
                       {item.descr}
                     </td>
-                    <td className="py-3.5 px-6 text-right font-black text-blue-600">
-                      +{item.quantity.toLocaleString()}
+                    <td className="py-3.5 px-6 text-right whitespace-nowrap">
+                      <span className="font-black text-blue-600">
+                        +{item.quantity.toLocaleString()}
+                      </span>
+                      {item.subRowCount > 1 && (
+                        <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                          Gom {item.subRowCount} dòng
+                        </span>
+                      )}
                     </td>
                     <td className="py-3.5 px-6 text-slate-500 text-xs max-w-sm truncate" title={item.remark}>
                       {item.remark || "-"}

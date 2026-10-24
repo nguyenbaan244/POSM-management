@@ -40,6 +40,21 @@ model Inventory {
   @@id([sku, account])
 }
 
+model InventoryBatch {
+  id        Int      @id @default(autoincrement())
+  sku       String
+  account   String   @default("Danone")
+  descr     String
+  batch     String
+  quantity  Int      @default(0)
+  mfgDate   String?
+  expDate   String?
+  updatedAt DateTime @default(now())
+
+  @@unique([sku, account, batch])
+}
+
+
 model Inbound {
   id        Int      @id @default(autoincrement())
   orderCode String   @default("LEGACY")
