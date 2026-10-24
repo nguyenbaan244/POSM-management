@@ -97,7 +97,7 @@ export default function ReportPage() {
       title: `BẢNG TỔNG HỢP NHẬP XUẤT TỒN THEO NGÀY (THÁNG ${selectedMonth})`,
       subtitles: [
         `Kỳ báo cáo: Từ ngày 01 đến ngày cuối tháng (${totalDays} ngày)`,
-        `Tổng tồn đầu kỳ: ${period.opening.toLocaleString()} | Tổng nhập: +${period.inbound.toLocaleString()} | Tổng xuất: -${period.outbound.toLocaleString()} | Tồn cuối kỳ: ${period.closing.toLocaleString()}`
+        `Tổng tồn đầu kỳ: ${period.opening.toLocaleString()} | Tổng nhập: +${period.inbound.toLocaleString()} | Tổng xuất: -${period.outbound.toLocaleString()} | Tồn cuối lý thuyết: ${period.closing.toLocaleString()} | Tồn cuối thực tế: ${period.actualClosing !== null ? period.actualClosing.toLocaleString() : "Chưa kiểm kê"}`
       ],
       data: dailySummary,
       columns: [
@@ -106,7 +106,9 @@ export default function ReportPage() {
         { header: "Tổng Nhập (+)", key: "inbound", width: 16, format: v => (Number(v) > 0 ? `+${Number(v).toLocaleString()}` : "-") },
         { header: "Tổng Xuất (-)", key: "outbound", width: 16, format: v => (Number(v) > 0 ? `-${Number(v).toLocaleString()}` : "-") },
         { header: "Biến Động Ròng", key: "netChange", width: 16, format: v => (Number(v) > 0 ? `+${Number(v).toLocaleString()}` : Number(v) < 0 ? Number(v).toLocaleString() : "-") },
-        { header: "Tồn Cuối Ngày", key: "closing", width: 16, format: v => Number(v).toLocaleString() }
+        { header: "Tồn Cuối Ngày Lý Thuyết", key: "theoreticalClosing", width: 24, format: v => Number(v).toLocaleString() },
+        { header: "Tồn Cuối Ngày Thực Tế", key: "actualClosing", width: 24, format: v => (v !== null && v !== undefined ? Number(v).toLocaleString() : "Chưa kiểm kê") },
+        { header: "Chênh Lệch (+/-)", key: "variance", width: 18, format: v => (v === null || v === undefined ? "-" : Number(v) > 0 ? `+${Number(v).toLocaleString()}` : Number(v).toLocaleString()) }
       ]
     });
     toast.success("Đã xuất file Excel bảng tổng hợp theo ngày!");
@@ -120,7 +122,7 @@ export default function ReportPage() {
       title: `BẢNG TỔNG HỢP NHẬP XUẤT TỒN THEO TUẦN (THÁNG ${selectedMonth})`,
       subtitles: [
         `Tổng hợp theo tuần trong tháng ${selectedMonth}`,
-        `Tổng tồn đầu kỳ: ${period.opening.toLocaleString()} | Tổng nhập: +${period.inbound.toLocaleString()} | Tổng xuất: -${period.outbound.toLocaleString()} | Tồn cuối kỳ: ${period.closing.toLocaleString()}`
+        `Tổng tồn đầu kỳ: ${period.opening.toLocaleString()} | Tổng nhập: +${period.inbound.toLocaleString()} | Tổng xuất: -${period.outbound.toLocaleString()} | Tồn cuối lý thuyết: ${period.closing.toLocaleString()}`
       ],
       data: weeklySummary,
       columns: [
@@ -131,7 +133,9 @@ export default function ReportPage() {
         { header: "Tổng Nhập (+)", key: "inbound", width: 16, format: v => (Number(v) > 0 ? `+${Number(v).toLocaleString()}` : "-") },
         { header: "Tổng Xuất (-)", key: "outbound", width: 16, format: v => (Number(v) > 0 ? `-${Number(v).toLocaleString()}` : "-") },
         { header: "Biến Động Ròng", key: "netChange", width: 16, format: v => (Number(v) > 0 ? `+${Number(v).toLocaleString()}` : Number(v) < 0 ? Number(v).toLocaleString() : "-") },
-        { header: "Tồn Cuối Tuần", key: "closing", width: 16, format: v => Number(v).toLocaleString() }
+        { header: "Tồn Cuối Tuần Lý Thuyết", key: "theoreticalClosing", width: 24, format: v => Number(v).toLocaleString() },
+        { header: "Tồn Cuối Tuần Thực Tế", key: "actualClosing", width: 24, format: v => (v !== null && v !== undefined ? Number(v).toLocaleString() : "Chưa kiểm kê") },
+        { header: "Chênh Lệch (+/-)", key: "variance", width: 18, format: v => (v === null || v === undefined ? "-" : Number(v) > 0 ? `+${Number(v).toLocaleString()}` : Number(v).toLocaleString()) }
       ]
     });
     toast.success("Đã xuất file Excel bảng tổng hợp theo tuần!");
@@ -145,7 +149,7 @@ export default function ReportPage() {
       title: `BẢNG TỔNG HỢP DỮ LIỆU THEO SKU TRONG KỲ (THÁNG ${selectedMonth})`,
       subtitles: [
         `Danh sách tổng hợp từng mã sản phẩm`,
-        `Tồn cuối kỳ toàn kho: ${period.closing.toLocaleString()} chiếc`
+        `Tồn cuối kỳ lý thuyết: ${period.closing.toLocaleString()} chiếc | Tồn thực tế: ${period.actualClosing !== null ? period.actualClosing.toLocaleString() : "Chưa kiểm kê"} chiếc`
       ],
       data: skuTotals,
       columns: [
@@ -155,7 +159,9 @@ export default function ReportPage() {
         { header: "Tổng Nhập (+)", key: "inbound", width: 16, format: v => `+${Number(v).toLocaleString()}` },
         { header: "Tổng Xuất (-)", key: "outbound", width: 16, format: v => `-${Number(v).toLocaleString()}` },
         { header: "Biến Động", key: "netChange", width: 16, format: v => (Number(v) >= 0 ? `+${Number(v).toLocaleString()}` : Number(v).toLocaleString()) },
-        { header: "Tồn Cuối Kỳ", key: "closing", width: 16, format: v => Number(v).toLocaleString() }
+        { header: "Tồn Cuối Kỳ Lý Thuyết", key: "theoreticalClosing", width: 24, format: v => Number(v).toLocaleString() },
+        { header: "Tồn Cuối Kỳ Thực Tế", key: "actualClosing", width: 24, format: v => (v !== null && v !== undefined ? Number(v).toLocaleString() : "Chưa kiểm kê") },
+        { header: "Chênh Lệch (+/-)", key: "variance", width: 18, format: v => (v === null || v === undefined ? "-" : Number(v) > 0 ? `+${Number(v).toLocaleString()}` : Number(v).toLocaleString()) }
       ]
     });
     toast.success("Đã xuất file Excel bảng tổng hợp theo SKU!");
@@ -176,7 +182,9 @@ export default function ReportPage() {
         { header: "Nhập (+)", key: "inbound", width: 16, format: v => (Number(v) > 0 ? `+${Number(v).toLocaleString()}` : "-") },
         { header: "Xuất (-)", key: "outbound", width: 16, format: v => (Number(v) > 0 ? `-${Number(v).toLocaleString()}` : "-") },
         { header: "Biến Động", key: "netChange", width: 16, format: v => (Number(v) > 0 ? `+${Number(v).toLocaleString()}` : Number(v) < 0 ? Number(v).toLocaleString() : "-") },
-        { header: "Tồn Cuối Ngày", key: "closing", width: 16, format: v => Number(v).toLocaleString() }
+        { header: "Tồn Cuối Lý Thuyết", key: "theoreticalClosing", width: 22, format: v => Number(v).toLocaleString() },
+        { header: "Tồn Cuối Thực Tế", key: "actualClosing", width: 22, format: v => (v !== null && v !== undefined ? Number(v).toLocaleString() : "Chưa kiểm kê") },
+        { header: "Chênh Lệch (+/-)", key: "variance", width: 18, format: v => (v === null || v === undefined ? "-" : Number(v) > 0 ? `+${Number(v).toLocaleString()}` : Number(v).toLocaleString()) }
       ]
     });
     toast.success("Đã xuất file Excel chi tiết SKU theo ngày!");
@@ -505,7 +513,9 @@ export default function ReportPage() {
                 <th className="py-3.5 px-6 text-right text-blue-600">Tổng Nhập (+)</th>
                 <th className="py-3.5 px-6 text-right text-orange-600">Tổng Xuất (-)</th>
                 <th className="py-3.5 px-6 text-right">Biến Động</th>
-                <th className="py-3.5 px-6 text-right font-bold text-slate-900">Tồn Cuối</th>
+                <th className="py-3.5 px-6 text-right font-bold text-slate-900">Tồn Cuối Lý Thuyết</th>
+                <th className="py-3.5 px-6 text-right font-bold text-emerald-700">Tồn Cuối Thực Tế</th>
+                <th className="py-3.5 px-6 text-right font-bold text-slate-700">Chênh Lệch</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
@@ -527,7 +537,33 @@ export default function ReportPage() {
                       {row.netChange > 0 ? `+${row.netChange.toLocaleString()}` : row.netChange.toLocaleString()}
                     </span>
                   </td>
-                  <td className="py-3.5 px-6 text-right font-black text-slate-900">{row.closing.toLocaleString()}</td>
+                  <td className="py-3.5 px-6 text-right font-black text-slate-900 font-mono">
+                    {row.theoreticalClosing.toLocaleString()}
+                  </td>
+                  <td className="py-3.5 px-6 text-right font-black text-emerald-700 font-mono">
+                    {row.actualClosing !== null ? (
+                      row.actualClosing.toLocaleString()
+                    ) : (
+                      <span className="text-slate-400 italic font-normal text-xs">Chưa kiểm kê</span>
+                    )}
+                  </td>
+                  <td className="py-3.5 px-6 text-right font-bold">
+                    {row.variance === null ? (
+                      <span className="text-slate-300">-</span>
+                    ) : row.variance === 0 ? (
+                      <span className="inline-block px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800">
+                        ✓ Khớp 100%
+                      </span>
+                    ) : row.variance < 0 ? (
+                      <span className="inline-block px-2 py-0.5 rounded text-[11px] font-bold bg-rose-100 text-rose-800 font-mono">
+                        {row.variance.toLocaleString()}
+                      </span>
+                    ) : (
+                      <span className="inline-block px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-800 font-mono">
+                        +{row.variance.toLocaleString()}
+                      </span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -541,7 +577,23 @@ export default function ReportPage() {
                   <td className="py-3.5 px-6 text-right text-emerald-300">
                     {period.netChange >= 0 ? `+${period.netChange.toLocaleString()}` : period.netChange.toLocaleString()}
                   </td>
-                  <td className="py-3.5 px-6 text-right font-black text-emerald-400">{period.closing.toLocaleString()}</td>
+                  <td className="py-3.5 px-6 text-right font-black text-emerald-300 font-mono">
+                    {period.closing.toLocaleString()}
+                  </td>
+                  <td className="py-3.5 px-6 text-right font-black text-teal-300 font-mono">
+                    {period.actualClosing !== null ? period.actualClosing.toLocaleString() : "-"}
+                  </td>
+                  <td className="py-3.5 px-6 text-right font-bold text-xs">
+                    {period.variance === null ? (
+                      "-"
+                    ) : period.variance === 0 ? (
+                      <span className="text-emerald-400">✓ Khớp</span>
+                    ) : period.variance < 0 ? (
+                      <span className="text-rose-400 font-mono">{period.variance.toLocaleString()}</span>
+                    ) : (
+                      <span className="text-amber-400 font-mono">+{period.variance.toLocaleString()}</span>
+                    )}
+                  </td>
                 </tr>
               </tfoot>
             )}
@@ -663,13 +715,15 @@ export default function ReportPage() {
                     <th className="py-4 px-6 text-right text-blue-600">Tổng Nhập (+)</th>
                     <th className="py-4 px-6 text-right text-orange-600">Tổng Xuất (-)</th>
                     <th className="py-4 px-6 text-right">Biến Động Ròng</th>
-                    <th className="py-4 px-6 text-right font-bold text-slate-800">Tồn Cuối Ngày</th>
+                    <th className="py-4 px-6 text-right font-bold text-slate-800">Tồn Cuối Lý Thuyết</th>
+                    <th className="py-4 px-6 text-right font-bold text-emerald-700">Tồn Cuối Thực Tế</th>
+                    <th className="py-4 px-6 text-right font-bold text-slate-700">Chênh Lệch</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium">
                   {dailySummary.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-12 text-center text-slate-400">
+                      <td colSpan={8} className="py-12 text-center text-slate-400">
                         Không có dữ liệu trong khoảng thời gian đã chọn.
                       </td>
                     </tr>
@@ -718,8 +772,37 @@ export default function ReportPage() {
                               <span className="text-slate-400">-</span>
                             )}
                           </td>
-                          <td className="py-3.5 px-6 text-right font-black text-slate-900 text-base">
-                            {row.closing.toLocaleString()}
+                          <td className="py-3.5 px-6 text-right font-black text-slate-900 text-base font-mono">
+                            {row.theoreticalClosing.toLocaleString()}
+                          </td>
+                          <td className="py-3.5 px-6 text-right font-black text-emerald-700 text-base font-mono">
+                            {row.hasActual && row.actualClosing !== null ? (
+                              <span className="inline-flex items-center">
+                                {row.actualClosing.toLocaleString()}
+                                <span className="ml-1.5 text-[10px] font-bold px-1 py-0.2 rounded bg-emerald-100 text-emerald-800">
+                                  Kiểm kê
+                                </span>
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 italic font-normal text-xs">Chưa kiểm kê</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-6 text-right font-bold">
+                            {!row.hasActual || row.variance === null ? (
+                              <span className="text-slate-300">-</span>
+                            ) : row.variance === 0 ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-bold bg-emerald-100 text-emerald-800">
+                                ✓ Khớp 100%
+                              </span>
+                            ) : row.variance < 0 ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-bold bg-rose-100 text-rose-800 font-mono">
+                                {row.variance.toLocaleString()}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-bold bg-amber-100 text-amber-800 font-mono">
+                                +{row.variance.toLocaleString()}
+                              </span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -736,8 +819,22 @@ export default function ReportPage() {
                       <td className="py-4 px-6 text-right text-emerald-300">
                         {period.netChange >= 0 ? `+${period.netChange.toLocaleString()}` : period.netChange.toLocaleString()}
                       </td>
-                      <td className="py-4 px-6 text-right font-black text-base text-emerald-400">
+                      <td className="py-4 px-6 text-right font-black text-base text-emerald-300 font-mono">
                         {period.closing.toLocaleString()}
+                      </td>
+                      <td className="py-4 px-6 text-right font-black text-base text-teal-300 font-mono">
+                        {period.actualClosing !== null ? period.actualClosing.toLocaleString() : "-"}
+                      </td>
+                      <td className="py-4 px-6 text-right font-bold text-xs">
+                        {period.variance === null ? (
+                          "-"
+                        ) : period.variance === 0 ? (
+                          <span className="text-emerald-400">✓ Khớp</span>
+                        ) : period.variance < 0 ? (
+                          <span className="text-rose-400 font-mono">{period.variance.toLocaleString()}</span>
+                        ) : (
+                          <span className="text-amber-400 font-mono">+{period.variance.toLocaleString()}</span>
+                        )}
                       </td>
                     </tr>
                   </tfoot>
@@ -759,7 +856,9 @@ export default function ReportPage() {
                     <th className="py-4 px-6 text-right text-blue-600">Tổng Nhập (+)</th>
                     <th className="py-4 px-6 text-right text-orange-600">Tổng Xuất (-)</th>
                     <th className="py-4 px-6 text-right">Biến Động Ròng</th>
-                    <th className="py-4 px-6 text-right font-bold text-slate-800">Tồn Cuối Tuần</th>
+                    <th className="py-4 px-6 text-right font-bold text-slate-800">Tồn Cuối Lý Thuyết</th>
+                    <th className="py-4 px-6 text-right font-bold text-emerald-700">Tồn Cuối Thực Tế</th>
+                    <th className="py-4 px-6 text-right font-bold text-slate-700">Chênh Lệch</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium">
@@ -792,7 +891,33 @@ export default function ReportPage() {
                           <span className="text-slate-400">-</span>
                         )}
                       </td>
-                      <td className="py-4 px-6 text-right font-black text-slate-900 text-base">{row.closing.toLocaleString()}</td>
+                      <td className="py-4 px-6 text-right font-black text-slate-900 text-base font-mono">
+                        {row.theoreticalClosing.toLocaleString()}
+                      </td>
+                      <td className="py-4 px-6 text-right font-black text-emerald-700 text-base font-mono">
+                        {row.actualClosing !== null ? (
+                          row.actualClosing.toLocaleString()
+                        ) : (
+                          <span className="text-slate-400 italic font-normal text-xs">Chưa kiểm kê</span>
+                        )}
+                      </td>
+                      <td className="py-4 px-6 text-right font-bold">
+                        {row.variance === null ? (
+                          <span className="text-slate-300">-</span>
+                        ) : row.variance === 0 ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-bold bg-emerald-100 text-emerald-800">
+                            ✓ Khớp
+                          </span>
+                        ) : row.variance < 0 ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-bold bg-rose-100 text-rose-800 font-mono">
+                            {row.variance.toLocaleString()}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-bold bg-amber-100 text-amber-800 font-mono">
+                            +{row.variance.toLocaleString()}
+                          </span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -805,8 +930,22 @@ export default function ReportPage() {
                     <td className="py-4 px-6 text-right text-emerald-300">
                       {period.netChange >= 0 ? `+${period.netChange.toLocaleString()}` : period.netChange.toLocaleString()}
                     </td>
-                    <td className="py-4 px-6 text-right font-black text-base text-emerald-400">
+                    <td className="py-4 px-6 text-right font-black text-base text-emerald-300 font-mono">
                       {period.closing.toLocaleString()}
+                    </td>
+                    <td className="py-4 px-6 text-right font-black text-base text-teal-300 font-mono">
+                      {period.actualClosing !== null ? period.actualClosing.toLocaleString() : "-"}
+                    </td>
+                    <td className="py-4 px-6 text-right font-bold text-xs">
+                      {period.variance === null ? (
+                        "-"
+                      ) : period.variance === 0 ? (
+                        <span className="text-emerald-400">✓ Khớp</span>
+                      ) : period.variance < 0 ? (
+                        <span className="text-rose-400 font-mono">{period.variance.toLocaleString()}</span>
+                      ) : (
+                        <span className="text-amber-400 font-mono">+{period.variance.toLocaleString()}</span>
+                      )}
                     </td>
                   </tr>
                 </tfoot>
@@ -847,13 +986,15 @@ export default function ReportPage() {
                   <th className="py-3.5 px-6 text-right">Tồn Đầu</th>
                   <th className="py-3.5 px-6 text-right text-blue-600">Nhập (+)</th>
                   <th className="py-3.5 px-6 text-right text-orange-600">Xuất (-)</th>
-                  <th className="py-3.5 px-6 text-right font-bold text-slate-800">Tồn Cuối</th>
+                  <th className="py-3.5 px-6 text-right font-bold text-slate-800">Tồn Cuối Lý Thuyết</th>
+                  <th className="py-3.5 px-6 text-right font-bold text-emerald-700">Tồn Cuối Thực Tế</th>
+                  <th className="py-3.5 px-6 text-right font-bold text-slate-700">Chênh Lệch</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
                 {filteredSkuDaily.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-slate-400">
+                    <td colSpan={9} className="py-12 text-center text-slate-400">
                       Không tìm thấy giao dịch SKU phù hợp với bộ lọc.
                     </td>
                   </tr>
@@ -870,7 +1011,33 @@ export default function ReportPage() {
                       <td className="py-3 px-6 text-right text-orange-600 font-bold">
                         {row.outbound > 0 ? `-${row.outbound.toLocaleString()}` : "-"}
                       </td>
-                      <td className="py-3 px-6 text-right font-black text-slate-900">{row.closing.toLocaleString()}</td>
+                      <td className="py-3 px-6 text-right font-black text-slate-900 font-mono">
+                        {row.theoreticalClosing.toLocaleString()}
+                      </td>
+                      <td className="py-3 px-6 text-right font-black text-emerald-700 font-mono">
+                        {row.hasActual && row.actualClosing !== null ? (
+                          row.actualClosing.toLocaleString()
+                        ) : (
+                          <span className="text-slate-400 italic font-normal text-xs">Chưa kiểm kê</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-6 text-right font-bold">
+                        {!row.hasActual || row.variance === null ? (
+                          <span className="text-slate-300">-</span>
+                        ) : row.variance === 0 ? (
+                          <span className="inline-block px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800">
+                            ✓ Khớp
+                          </span>
+                        ) : row.variance < 0 ? (
+                          <span className="inline-block px-2 py-0.5 rounded text-[11px] font-bold bg-rose-100 text-rose-800 font-mono">
+                            {row.variance.toLocaleString()}
+                          </span>
+                        ) : (
+                          <span className="inline-block px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-800 font-mono">
+                            +{row.variance.toLocaleString()}
+                          </span>
+                        )}
+                      </td>
                     </tr>
                   ))
                 )}

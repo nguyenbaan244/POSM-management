@@ -23,18 +23,28 @@ export async function GET(request: Request) {
     const selectedDate = searchParams.get("date"); // e.g. "2026-10-23" or "all"
     const selectedSku = searchParams.get("sku"); // e.g. "194402" or "all"
 
-    // 1. Fetch current inventory, master data, inbounds and outbounds
-    const [inventoryList, masterDataList, inbounds, outbounds] = await Promise.all([
+    // 1. Fetch current inventory, master data, inbounds, outbounds, snapshots and baselines
+    const [inventoryList, masterDataList, inbounds, outbounds, snapshots, baselines] = await Promise.all([
       prisma.inventory.findMany({ orderBy: { sku: "asc" } }),
       prisma.masterData.findMany({ orderBy: { sku: "asc" } }),
       prisma.inbound.findMany({ where: { reversed: false }, orderBy: { date: "asc" } }),
-      prisma.outbound.findMany({ where: { reversed: false }, orderBy: { date: "asc" } })
+      prisma.outbound.findMany({ where: { reversed: false }, orderBy: { date: "asc" } }),
+      prisma.latestInventorySnapshot.findMany({ orderBy: { date: "asc" } }),
+      prisma.baselineInventory.findMany({ orderBy: { date: "asc" } })
     ]);
 
     // Build SKU dictionary
     const skuMeta: Record<string, { descr: string, currentStock: number }> = {};
     for (const m of masterDataList) {
       skuMeta[m.sku] = { descr: m.descr, currentStock: 0 };
+    }
+    for (const b of baselines) {
+      if (!skuMeta[b.sku]) skuMeta[b.sku] = { descr: b.descr, currentStock: 0 };
+      else if (b.descr) skuMeta[b.sku].descr = b.descr;
+    }
+    for (const s of snapshots) {
+      if (!skuMeta[s.sku]) skuMeta[s.sku] = { descr: s.descr, currentStock: 0 };
+      else if (s.descr) skuMeta[s.sku].descr = s.descr;
     }
     for (const inv of inventoryList) {
       if (!skuMeta[inv.sku]) {
@@ -44,10 +54,32 @@ export async function GET(request: Request) {
       }
     }
 
-    // Collect all dates
-    const dateSet = new Set<string>();
-    inbounds.forEach(ib => dateSet.add(toYMD(new Date(ib.date))));
-    outbounds.forEach(ob => dateSet.add(toYMD(new Date(ob.date))));
+    // Build actual inventory snapshot map: [dateYMD][sku] => number
+    // Lưu nhớ toàn bộ dữ liệu kiểm kê thực tế theo từng ngày (từ cả LatestInventorySnapshot và BaselineInventory)
+    const actualStockMap: Record<string, Record<string, number>> = {};
+    const datesWithActualUpload = new Set<string>();
+
+    // Ưu tiên nạp baseline trước
+    for (const b of baselines) {
+      const d = toYMD(new Date(b.date));
+      if (!actualStockMap[d]) actualStockMap[d] = {};
+      actualStockMap[d][b.sku] = (actualStockMap[d][b.sku] || 0) + b.quantity;
+      datesWithActualUpload.add(d);
+    }
+
+    // Sau đó nạp từ LatestInventorySnapshot (nếu ngày đó có upload tồn mới, ghi đè chính xác ngày đó)
+    const snapshotDates = new Set<string>();
+    for (const s of snapshots) {
+      snapshotDates.add(toYMD(new Date(s.date)));
+    }
+    for (const d of snapshotDates) {
+      actualStockMap[d] = {}; // Làm sạch để nạp chính xác từ snapshot của ngày đó
+    }
+    for (const s of snapshots) {
+      const d = toYMD(new Date(s.date));
+      actualStockMap[d][s.sku] = (actualStockMap[d][s.sku] || 0) + s.quantity;
+      datesWithActualUpload.add(d);
+    }
 
     // Determine target month
     let targetYear = 2026;
@@ -62,7 +94,14 @@ export async function GET(request: Request) {
 
     // Generate full calendar days of target month (day 1 to last day)
     const monthCalendarDays = getDaysInMonth(targetYear, targetMonth);
+    const firstMonthDay = monthCalendarDays[0];
+
+    // Collect all transaction dates
+    const dateSet = new Set<string>();
+    inbounds.forEach(ib => dateSet.add(toYMD(new Date(ib.date))));
+    outbounds.forEach(ob => dateSet.add(toYMD(new Date(ob.date))));
     monthCalendarDays.forEach(d => dateSet.add(d));
+    datesWithActualUpload.forEach(d => dateSet.add(d));
 
     const allDatesSorted = Array.from(dateSet).sort();
 
@@ -84,40 +123,82 @@ export async function GET(request: Request) {
 
     const allSkus = Object.keys(skuMeta);
 
-    // Build timeline backwards from the latest date in allDatesSorted
-    const skuLedger: Record<string, Record<string, { opening: number, in: number, out: number, closing: number }>> = {};
+    // Xác định số tồn ban đầu ngày đầu tháng (firstMonthDay)
+    // Ưu tiên 1: Tồn từ bảng BaselineInventory tại firstMonthDay
+    const baselineFirstDayMap: Record<string, number> = {};
+    let hasBaselineOnFirstDay = false;
+    for (const b of baselines) {
+      const d = toYMD(new Date(b.date));
+      if (d === firstMonthDay) {
+        baselineFirstDayMap[b.sku] = (baselineFirstDayMap[b.sku] || 0) + b.quantity;
+        hasBaselineOnFirstDay = true;
+      }
+    }
+
+    // Xây dựng Timeline tính toán Lý Thuyết cuốn chiếu theo chiều xuôi từ đầu tháng:
+    // Tồn Cuối Lý Thuyết = Tồn Đầu + Nhập - Xuất
+    // Tồn Đầu Ngày Sau = Tồn Cuối Lý Thuyết Ngày Trước
+    const skuLedger: Record<string, Record<string, {
+      opening: number;
+      in: number;
+      out: number;
+      theoreticalClosing: number;
+      closing: number;
+      actualClosing: number | null;
+      variance: number | null;
+      hasActual: boolean;
+    }>> = {};
 
     for (const sku of allSkus) {
       skuLedger[sku] = {};
-      let runningClosing = skuMeta[sku].currentStock;
+      let runningOpening = 0;
 
-      for (let i = allDatesSorted.length - 1; i >= 0; i--) {
-        const d = allDatesSorted[i];
+      if (hasBaselineOnFirstDay) {
+        runningOpening = baselineFirstDayMap[sku] || 0;
+      } else {
+        // Fallback: tính ngược từ currentStock
+        let cur = skuMeta[sku]?.currentStock || 0;
+        for (let i = allDatesSorted.length - 1; i >= 0; i--) {
+          const d = allDatesSorted[i];
+          if (d >= firstMonthDay) {
+            cur = cur - (ibMap[d]?.[sku] || 0) + (obMap[d]?.[sku] || 0);
+          }
+        }
+        runningOpening = Math.max(0, cur);
+      }
+
+      for (const d of monthCalendarDays) {
         const inQty = ibMap[d]?.[sku] || 0;
         const outQty = obMap[d]?.[sku] || 0;
-        const opening = runningClosing - inQty + outQty;
+        const opening = runningOpening;
+        const theoreticalClosing = opening + inQty - outQty;
+
+        const hasActual = datesWithActualUpload.has(d);
+        const actualClosing = hasActual ? (actualStockMap[d]?.[sku] ?? 0) : null;
+        const variance = actualClosing !== null ? actualClosing - theoreticalClosing : null;
 
         skuLedger[sku][d] = {
           opening,
           in: inQty,
           out: outQty,
-          closing: runningClosing
+          theoreticalClosing,
+          closing: theoreticalClosing,
+          actualClosing,
+          variance,
+          hasActual
         };
 
-        runningClosing = opening;
+        runningOpening = theoreticalClosing;
       }
     }
 
-    // Target filtered dates for the month
+    // Filter dates if specified
     let filteredDates = monthCalendarDays;
-
     if (selectedDate && selectedDate !== "all") {
       filteredDates = filteredDates.filter(d => d === selectedDate);
-    } else if (monthParam === "all") {
-      filteredDates = allDatesSorted;
     }
 
-    // Target SKUs
+    // Filter SKUs if specified
     let targetSkus = allSkus;
     if (selectedSku && selectedSku !== "all") {
       targetSkus = targetSkus.filter(s => s === selectedSku);
@@ -130,15 +211,32 @@ export async function GET(request: Request) {
       let opening = 0;
       let inbound = 0;
       let outbound = 0;
-      let closing = 0;
+      let theoreticalClosing = 0;
+      let actualClosing: number | null = null;
+      const hasActual = datesWithActualUpload.has(d);
 
       for (const sku of targetSkus) {
-        const record = skuLedger[sku]?.[d] || { opening: 0, in: 0, out: 0, closing: 0 };
+        const record = skuLedger[sku]?.[d] || {
+          opening: 0,
+          in: 0,
+          out: 0,
+          theoreticalClosing: 0,
+          closing: 0,
+          actualClosing: null,
+          variance: null,
+          hasActual: false
+        };
         opening += record.opening;
         inbound += record.in;
         outbound += record.out;
-        closing += record.closing;
+        theoreticalClosing += record.theoreticalClosing;
+        if (hasActual && record.actualClosing !== null) {
+          if (actualClosing === null) actualClosing = 0;
+          actualClosing += record.actualClosing;
+        }
       }
+
+      const variance = actualClosing !== null ? actualClosing - theoreticalClosing : null;
 
       if (inbound > 0 || outbound > 0) {
         activeTransactionDaysCount++;
@@ -150,12 +248,16 @@ export async function GET(request: Request) {
         inbound,
         outbound,
         netChange: inbound - outbound,
-        closing,
+        theoreticalClosing,
+        closing: theoreticalClosing,
+        actualClosing,
+        variance,
+        hasActual,
         hasActivity: inbound > 0 || outbound > 0
       };
     });
 
-    // Construct Weekly Summary (Tuần 1, Tuần 2, Tuần 3, Tuần 4, Tuần 5)
+    // Construct Weekly Summary (Tuần 1..Tuần 5)
     const weeklySummary: any[] = [];
     if (filteredDates.length >= 28) {
       const weekBuckets = [
@@ -166,7 +268,7 @@ export async function GET(request: Request) {
         { label: "Tuần 5", startDay: 29, endDay: monthCalendarDays.length }
       ];
 
-      weekBuckets.forEach((bucket, idx) => {
+      weekBuckets.forEach((bucket) => {
         const daysInBucket = filteredDates.filter(d => {
           const dayNum = parseInt(d.split("-")[2], 10);
           return dayNum >= bucket.startDay && dayNum <= bucket.endDay;
@@ -179,16 +281,24 @@ export async function GET(request: Request) {
           let opening = 0;
           let inbound = 0;
           let outbound = 0;
-          let closing = 0;
+          let theoreticalClosing = 0;
+          let actualClosing: number | null = null;
           let activeDays = 0;
 
-          // Opening is the opening of the first day of the week
           for (const sku of targetSkus) {
             opening += skuLedger[sku]?.[firstDay]?.opening || 0;
-            closing += skuLedger[sku]?.[lastDay]?.closing || 0;
+            theoreticalClosing += skuLedger[sku]?.[lastDay]?.theoreticalClosing || 0;
           }
 
-          // Inbound and Outbound is sum of all days in this week
+          // Lấy tồn thực tế của ngày cuối cùng trong tuần có kiểm kê
+          for (let i = daysInBucket.length - 1; i >= 0; i--) {
+            const dayRow = dailySummary.find(r => r.date === daysInBucket[i]);
+            if (dayRow && dayRow.actualClosing !== null) {
+              actualClosing = dayRow.actualClosing;
+              break;
+            }
+          }
+
           daysInBucket.forEach(d => {
             const dayRow = dailySummary.find(r => r.date === d);
             if (dayRow) {
@@ -207,7 +317,10 @@ export async function GET(request: Request) {
             inbound,
             outbound,
             netChange: inbound - outbound,
-            closing,
+            theoreticalClosing,
+            closing: theoreticalClosing,
+            actualClosing,
+            variance: actualClosing !== null ? actualClosing - theoreticalClosing : null,
             daysCount: daysInBucket.length,
             activeDaysCount: activeDays
           });
@@ -219,9 +332,17 @@ export async function GET(request: Request) {
     const skuDailySummary: any[] = [];
     for (const d of filteredDates) {
       for (const sku of targetSkus) {
-        const record = skuLedger[sku]?.[d] || { opening: 0, in: 0, out: 0, closing: 0 };
-        // If viewing single day or day has activity, include it
-        if (record.opening > 0 || record.in > 0 || record.out > 0 || record.closing > 0) {
+        const record = skuLedger[sku]?.[d] || {
+          opening: 0,
+          in: 0,
+          out: 0,
+          theoreticalClosing: 0,
+          closing: 0,
+          actualClosing: null,
+          variance: null,
+          hasActual: false
+        };
+        if (record.opening > 0 || record.in > 0 || record.out > 0 || record.theoreticalClosing > 0 || record.hasActual) {
           skuDailySummary.push({
             date: d,
             sku,
@@ -230,23 +351,35 @@ export async function GET(request: Request) {
             inbound: record.in,
             outbound: record.out,
             netChange: record.in - record.out,
-            closing: record.closing
+            theoreticalClosing: record.theoreticalClosing,
+            closing: record.theoreticalClosing,
+            actualClosing: record.actualClosing,
+            variance: record.variance,
+            hasActual: record.hasActual
           });
         }
       }
     }
 
-    // Aggregate totals for the whole period
+    // Aggregate totals for the period
     let periodOpening = 0;
     let periodClosing = 0;
     let periodTotalIn = 0;
     let periodTotalOut = 0;
+    let periodActualClosing: number | null = null;
 
     if (dailySummary.length > 0) {
       periodOpening = dailySummary[0].opening;
-      periodClosing = dailySummary[dailySummary.length - 1].closing;
+      periodClosing = dailySummary[dailySummary.length - 1].theoreticalClosing;
       periodTotalIn = dailySummary.reduce((sum, item) => sum + item.inbound, 0);
       periodTotalOut = dailySummary.reduce((sum, item) => sum + item.outbound, 0);
+
+      for (let i = dailySummary.length - 1; i >= 0; i--) {
+        if (dailySummary[i].actualClosing !== null) {
+          periodActualClosing = dailySummary[i].actualClosing;
+          break;
+        }
+      }
     }
 
     // SKU Totals in the filtered period
@@ -254,17 +387,26 @@ export async function GET(request: Request) {
       let skuIn = 0;
       let skuOut = 0;
       let firstOpening = 0;
-      let lastClosing = 0;
+      let lastTheoreticalClosing = 0;
+      let lastActualClosing: number | null = null;
 
       if (filteredDates.length > 0) {
         const firstDate = filteredDates[0];
         const lastDate = filteredDates[filteredDates.length - 1];
         firstOpening = skuLedger[sku]?.[firstDate]?.opening ?? 0;
-        lastClosing = skuLedger[sku]?.[lastDate]?.closing ?? 0;
+        lastTheoreticalClosing = skuLedger[sku]?.[lastDate]?.theoreticalClosing ?? 0;
 
         for (const d of filteredDates) {
           skuIn += skuLedger[sku]?.[d]?.in ?? 0;
           skuOut += skuLedger[sku]?.[d]?.out ?? 0;
+        }
+
+        for (let i = filteredDates.length - 1; i >= 0; i--) {
+          const rec = skuLedger[sku]?.[filteredDates[i]];
+          if (rec && rec.actualClosing !== null) {
+            lastActualClosing = rec.actualClosing;
+            break;
+          }
         }
       }
 
@@ -275,7 +417,10 @@ export async function GET(request: Request) {
         inbound: skuIn,
         outbound: skuOut,
         netChange: skuIn - skuOut,
-        closing: lastClosing,
+        theoreticalClosing: lastTheoreticalClosing,
+        closing: lastTheoreticalClosing,
+        actualClosing: lastActualClosing,
+        variance: lastActualClosing !== null ? lastActualClosing - lastTheoreticalClosing : null,
         currentStock: skuMeta[sku]?.currentStock ?? 0
       };
     });
@@ -289,7 +434,10 @@ export async function GET(request: Request) {
         inbound: periodTotalIn,
         outbound: periodTotalOut,
         netChange: periodTotalIn - periodTotalOut,
+        theoreticalClosing: periodClosing,
         closing: periodClosing,
+        actualClosing: periodActualClosing,
+        variance: periodActualClosing !== null ? periodActualClosing - periodClosing : null
       },
       targetMonth: `${targetYear}-${String(targetMonth).padStart(2, "0")}`,
       totalDaysInMonth: filteredDates.length,

@@ -267,8 +267,14 @@ export async function POST(request: Request) {
     // 3. TỒN KHO CŨ / TỒN ĐẦU KỲ (Baseline Inventory - Thay thế Danh mục SKU)
     // ==========================================
     } else if (format === "baseline-inventory" || format === "master-data") {
-      const baselineDateStr = snapshotDateParam || "2026-10-01";
+      if (!snapshotDateParam || snapshotDateParam.trim() === "") {
+        return NextResponse.json({ error: "Bắt buộc phải nhập ngày chốt tồn kho cũ (Đầu kỳ) khi tải lên file!" }, { status: 400 });
+      }
+      const baselineDateStr = snapshotDateParam.trim();
       const baselineDate = new Date(`${baselineDateStr}T00:00:00.000Z`);
+      if (isNaN(baselineDate.getTime())) {
+        return NextResponse.json({ error: "Định dạng ngày chốt tồn kho cũ không hợp lệ (YYYY-MM-DD)" }, { status: 400 });
+      }
       const dateYMD = toYMD(baselineDate);
 
       // Aggregation maps
@@ -358,9 +364,15 @@ export async function POST(request: Request) {
         }
       }
 
-      // Lưu/Cập nhật vào bảng BaselineInventory
+      // Lưu/Cập nhật vào bảng BaselineInventory (xóa sạch toàn bộ mốc của ngày này trước khi nạp mới)
       await prisma.baselineInventory.deleteMany({
-        where: { date: baselineDate, account: "Danone" }
+        where: {
+          date: {
+            gte: new Date(`${dateYMD}T00:00:00.000Z`),
+            lte: new Date(`${dateYMD}T23:59:59.999Z`)
+          },
+          account: "Danone"
+        }
       });
 
       const recordsToInsert = Array.from(batchMap.values()).map(item => ({
@@ -372,8 +384,8 @@ export async function POST(request: Request) {
         quantity: item.quantity
       }));
 
-      for (let i = 0; i < recordsToInsert.length; i += 50) {
-        await prisma.baselineInventory.createMany({ data: recordsToInsert.slice(i, i + 50) });
+      for (let i = 0; i < recordsToInsert.length; i += 100) {
+        await prisma.baselineInventory.createMany({ data: recordsToInsert.slice(i, i + 100) });
       }
 
       // Cập nhật MasterData
@@ -413,8 +425,14 @@ export async function POST(request: Request) {
     // 4. TỒN KHO MỚI NHẤT (Latest Inventory - Không bắt buộc & Có kiểm tra lệch tồn)
     // ==========================================
     } else if (format === "inventory") {
-      const snapshotDateStr = snapshotDateParam || "2026-10-23";
+      if (!snapshotDateParam || snapshotDateParam.trim() === "") {
+        return NextResponse.json({ error: "Bắt buộc phải nhập ngày chốt tồn kho mới khi tải lên file!" }, { status: 400 });
+      }
+      const snapshotDateStr = snapshotDateParam.trim();
       const snapshotDate = new Date(`${snapshotDateStr}T00:00:00.000Z`);
+      if (isNaN(snapshotDate.getTime())) {
+        return NextResponse.json({ error: "Định dạng ngày chốt tồn kho mới không hợp lệ (YYYY-MM-DD)" }, { status: 400 });
+      }
       const dateYMD = toYMD(snapshotDate);
 
       const skuAgg = new Map<string, { sku: string, descr: string, quantity: number }>();
@@ -529,9 +547,15 @@ export async function POST(request: Request) {
         }
       }
 
-      // 5. Lưu vào LatestInventorySnapshot
+      // 5. Lưu vào LatestInventorySnapshot (xóa toàn bộ snapshot trong ngày và chèn mới dạng batch)
       await prisma.latestInventorySnapshot.deleteMany({
-        where: { date: snapshotDate, account: "Danone" }
+        where: {
+          date: {
+            gte: new Date(`${dateYMD}T00:00:00.000Z`),
+            lte: new Date(`${dateYMD}T23:59:59.999Z`)
+          },
+          account: "Danone"
+        }
       });
 
       const snapshotList = Array.from(batchAgg.values()).map(b => ({
@@ -543,23 +567,23 @@ export async function POST(request: Request) {
         quantity: b.quantity
       }));
 
-      for (let i = 0; i < snapshotList.length; i += 50) {
-        await prisma.latestInventorySnapshot.createMany({ data: snapshotList.slice(i, i + 50) });
+      for (let i = 0; i < snapshotList.length; i += 100) {
+        await prisma.latestInventorySnapshot.createMany({ data: snapshotList.slice(i, i + 100) });
       }
 
-      // 6. Cập nhật bảng Inventory & InventoryBatch hiện hành
+      // 6. Cập nhật bảng Inventory & InventoryBatch hiện hành (tối ưu tốc độ cao)
       await prisma.inventory.deleteMany({});
       await prisma.inventoryBatch.deleteMany({});
 
+      const skuList = Array.from(skuAgg.values()).map(item => ({
+        sku: item.sku,
+        account: "Danone",
+        descr: item.descr,
+        quantity: item.quantity
+      }));
+      await prisma.inventory.createMany({ data: skuList });
+
       for (const item of skuAgg.values()) {
-        await prisma.inventory.create({
-          data: {
-            sku: item.sku,
-            account: "Danone",
-            descr: item.descr,
-            quantity: item.quantity
-          }
-        });
         await prisma.masterData.upsert({
           where: { sku_account: { sku: item.sku, account: "Danone" } },
           update: { descr: item.descr },
@@ -567,18 +591,18 @@ export async function POST(request: Request) {
         });
       }
 
-      for (const bItem of batchAgg.values()) {
-        await prisma.inventoryBatch.create({
-          data: {
-            sku: bItem.sku,
-            account: "Danone",
-            descr: bItem.descr,
-            batch: bItem.batch,
-            quantity: bItem.quantity,
-            mfgDate: bItem.mfgDate,
-            expDate: bItem.expDate
-          }
-        });
+      const batchListToInsert = Array.from(batchAgg.values()).map(bItem => ({
+        sku: bItem.sku,
+        account: "Danone",
+        descr: bItem.descr,
+        batch: bItem.batch,
+        quantity: bItem.quantity,
+        mfgDate: bItem.mfgDate,
+        expDate: bItem.expDate
+      }));
+
+      for (let i = 0; i < batchListToInsert.length; i += 100) {
+        await prisma.inventoryBatch.createMany({ data: batchListToInsert.slice(i, i + 100) });
       }
 
       importedCount = skuAgg.size;

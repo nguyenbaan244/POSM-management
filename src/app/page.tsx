@@ -26,8 +26,8 @@ type UploadFormat = "inbound" | "outbound" | "inventory" | "baseline-inventory";
 
 export default function UploadDataPage() {
   const [selectedFormat, setSelectedFormat] = useState<UploadFormat>("inbound");
-  const [snapshotDate, setSnapshotDate] = useState<string>("2026-10-23");
-  const [baselineDate, setBaselineDate] = useState<string>("2026-10-01");
+  const [snapshotDate, setSnapshotDate] = useState<string>("");
+  const [baselineDate, setBaselineDate] = useState<string>("");
   const [file, setFile] = useState<File | null>(null);
   const [previewRows, setPreviewRows] = useState<any[]>([]);
   const [detectedColumns, setDetectedColumns] = useState<string[]>([]);
@@ -111,6 +111,45 @@ export default function UploadDataPage() {
     setFile(selectedFile);
     setUploadResult(null);
 
+    const name = selectedFile.name;
+    // Auto-detect date from filename (e.g. "22.10.2026", "23.10", "2026-10-22")
+    const dmy = name.match(/(\d{1,2})[\.\/\-](\d{1,2})(?:[\.\/\-](\d{4}))?/);
+    if (dmy) {
+      const day = dmy[1].padStart(2, "0");
+      const month = dmy[2].padStart(2, "0");
+      const year = dmy[3] || "2026";
+      const detectedDate = `${year}-${month}-${day}`;
+      if (selectedFormat === "inventory") {
+        setSnapshotDate(detectedDate);
+      } else if (selectedFormat === "baseline-inventory") {
+        setBaselineDate(detectedDate);
+      }
+    }
+
+    // Auto-detect format from filename if obvious
+    const lowerName = name.toLowerCase();
+    if (lowerName.includes("inbound") && selectedFormat !== "inbound") {
+      setSelectedFormat("inbound");
+    } else if (lowerName.includes("outbound") && selectedFormat !== "outbound") {
+      setSelectedFormat("outbound");
+    } else if ((lowerName.includes("hôm nay") || lowerName.includes("test") || lowerName.includes("mới")) && lowerName.includes("inventory")) {
+      setSelectedFormat("inventory");
+      if (dmy) {
+        const day = dmy[1].padStart(2, "0");
+        const month = dmy[2].padStart(2, "0");
+        const year = dmy[3] || "2026";
+        setSnapshotDate(`${year}-${month}-${day}`);
+      }
+    } else if ((lowerName.includes("hôm qua") || lowerName.includes("qua") || lowerName.includes("baseline") || lowerName.includes("đầu kỳ")) && lowerName.includes("inventory")) {
+      setSelectedFormat("baseline-inventory");
+      if (dmy) {
+        const day = dmy[1].padStart(2, "0");
+        const month = dmy[2].padStart(2, "0");
+        const year = dmy[3] || "2026";
+        setBaselineDate(`${year}-${month}-${day}`);
+      }
+    }
+
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
@@ -151,6 +190,16 @@ export default function UploadDataPage() {
   const handleUpload = async () => {
     if (!file) {
       toast.error("Vui lòng chọn một file Excel hoặc CSV trước khi tải lên.");
+      return;
+    }
+
+    if (selectedFormat === "inventory" && (!snapshotDate || snapshotDate.trim() === "")) {
+      toast.error("Bắt buộc phải chọn Ngày chốt tồn kho mới trước khi tải lên!");
+      return;
+    }
+
+    if (selectedFormat === "baseline-inventory" && (!baselineDate || baselineDate.trim() === "")) {
+      toast.error("Bắt buộc phải chọn Ngày chốt tồn kho cũ trước khi tải lên!");
       return;
     }
 
@@ -286,30 +335,54 @@ export default function UploadDataPage() {
 
           {/* Date Picker Requirement for Inventory and Baseline */}
           {selectedFormat === "inventory" && (
-            <div className="flex items-center bg-white px-4 py-2 rounded-2xl border border-emerald-200 shadow-sm">
-              <Calendar className="w-4 h-4 mr-2 text-emerald-600" />
+            <div className={`flex items-center px-4 py-2.5 rounded-2xl border transition-all ${
+              !snapshotDate 
+                ? "bg-rose-50/90 border-rose-300 ring-2 ring-rose-200" 
+                : "bg-emerald-50/80 border-emerald-300 shadow-sm"
+            }`}>
+              <Calendar className={`w-5 h-5 mr-3 shrink-0 ${!snapshotDate ? "text-rose-600 animate-pulse" : "text-emerald-600"}`} />
               <div className="text-xs">
-                <span className="font-bold text-slate-700 block">Xác nhận ngày chốt tồn kho mới:</span>
+                <span className="font-bold flex items-center">
+                  <span className="text-slate-900">Ngày chốt tồn kho mới:</span>
+                  <span className={`ml-2 text-[10px] font-black px-1.5 py-0.5 rounded ${
+                    !snapshotDate ? "bg-rose-200 text-rose-800" : "bg-emerald-200 text-emerald-800"
+                  }`}>
+                    * BẮT BUỘC CHỌN
+                  </span>
+                </span>
                 <input
                   type="date"
                   value={snapshotDate}
                   onChange={(e) => setSnapshotDate(e.target.value)}
-                  className="mt-0.5 font-bold text-emerald-700 outline-none bg-transparent text-xs"
+                  required
+                  className="mt-1 font-bold text-slate-900 text-sm outline-none bg-transparent cursor-pointer block"
                 />
               </div>
             </div>
           )}
 
           {selectedFormat === "baseline-inventory" && (
-            <div className="flex items-center bg-white px-4 py-2 rounded-2xl border border-purple-200 shadow-sm">
-              <Calendar className="w-4 h-4 mr-2 text-purple-600" />
+            <div className={`flex items-center px-4 py-2.5 rounded-2xl border transition-all ${
+              !baselineDate 
+                ? "bg-rose-50/90 border-rose-300 ring-2 ring-rose-200" 
+                : "bg-purple-50/80 border-purple-300 shadow-sm"
+            }`}>
+              <Calendar className={`w-5 h-5 mr-3 shrink-0 ${!baselineDate ? "text-rose-600 animate-pulse" : "text-purple-600"}`} />
               <div className="text-xs">
-                <span className="font-bold text-slate-700 block">Xác nhận ngày chốt tồn kho cũ:</span>
+                <span className="font-bold flex items-center">
+                  <span className="text-slate-900">Ngày chốt tồn kho cũ:</span>
+                  <span className={`ml-2 text-[10px] font-black px-1.5 py-0.5 rounded ${
+                    !baselineDate ? "bg-rose-200 text-rose-800" : "bg-purple-200 text-purple-800"
+                  }`}>
+                    * BẮT BUỘC CHỌN
+                  </span>
+                </span>
                 <input
                   type="date"
                   value={baselineDate}
                   onChange={(e) => setBaselineDate(e.target.value)}
-                  className="mt-0.5 font-bold text-purple-700 outline-none bg-transparent text-xs"
+                  required
+                  className="mt-1 font-bold text-slate-900 text-sm outline-none bg-transparent cursor-pointer block"
                 />
               </div>
             </div>
@@ -402,6 +475,14 @@ export default function UploadDataPage() {
                   </div>
                 </div>
 
+                {((selectedFormat === "inventory" && !snapshotDate) ||
+                  (selectedFormat === "baseline-inventory" && !baselineDate)) && (
+                  <div className="w-full sm:w-auto flex items-center px-3.5 py-2 bg-rose-50 border border-rose-300 rounded-xl text-xs font-bold text-rose-700 animate-pulse">
+                    <AlertTriangle className="w-4 h-4 mr-2 text-rose-600 shrink-0" />
+                    Chưa chọn ngày chốt tồn ở khung trên!
+                  </div>
+                )}
+
                 <div className="flex items-center gap-3 w-full sm:w-auto">
                   <button
                     type="button"
@@ -417,8 +498,12 @@ export default function UploadDataPage() {
                   <button
                     type="button"
                     onClick={handleUpload}
-                    disabled={isUploading}
-                    className="flex-1 sm:flex-initial flex items-center justify-center px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 text-white font-bold rounded-xl hover:shadow-lg hover:shadow-emerald-500/30 transition-all active:scale-95 disabled:opacity-50 text-sm"
+                    disabled={
+                      isUploading ||
+                      (selectedFormat === "inventory" && !snapshotDate) ||
+                      (selectedFormat === "baseline-inventory" && !baselineDate)
+                    }
+                    className="flex-1 sm:flex-initial flex items-center justify-center px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 text-white font-bold rounded-xl hover:shadow-lg hover:shadow-emerald-500/30 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                   >
                     {isUploading ? (
                       <>
