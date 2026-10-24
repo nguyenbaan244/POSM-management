@@ -17,7 +17,9 @@ import {
   Info,
   Calendar,
   Scale,
-  ArrowRight
+  ArrowRight,
+  Trash2,
+  X
 } from "lucide-react";
 import { toast } from "sonner";
 import * as xlsx from "xlsx";
@@ -35,6 +37,12 @@ export default function UploadDataPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<any | null>(null);
   const [currentInventory, setCurrentInventory] = useState<any[]>([]);
+
+  // Reset Data Modal State
+  const [showResetModal, setShowResetModal] = useState<boolean>(false);
+  const [resetScope, setResetScope] = useState<"all" | "transactions" | "inventory">("all");
+  const [resetIncludeMaster, setResetIncludeMaster] = useState<boolean>(false);
+  const [isResetting, setIsResetting] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -87,7 +95,7 @@ export default function UploadDataPage() {
       badge: "Không bắt buộc",
       icon: PackageSearch,
       columns: ["Sku", "DESCR", "Qty", "Loc", "BatchNo"],
-      description: "Hệ thống tự động tính toán tồn kho theo lịch sử. Nếu bạn upload tồn kho mới, hệ thống sẽ kiểm tra khớp lệnh lịch sử."
+      description: "Hệ thống tự động tính toán tồn kho theo lịch sử. Nếu bạn upload tồn kho mới, hệ thống sẽ đối soát xem có khớp với lịch sử hay không."
     },
     "baseline-inventory": {
       title: "Tồn Kho Cũ (Baseline / Đầu Kỳ)",
@@ -111,43 +119,17 @@ export default function UploadDataPage() {
     setFile(selectedFile);
     setUploadResult(null);
 
-    const name = selectedFile.name;
-    // Auto-detect date from filename (e.g. "22.10.2026", "23.10", "2026-10-22")
-    const dmy = name.match(/(\d{1,2})[\.\/\-](\d{1,2})(?:[\.\/\-](\d{4}))?/);
-    if (dmy) {
-      const day = dmy[1].padStart(2, "0");
-      const month = dmy[2].padStart(2, "0");
-      const year = dmy[3] || "2026";
-      const detectedDate = `${year}-${month}-${day}`;
-      if (selectedFormat === "inventory") {
-        setSnapshotDate(detectedDate);
-      } else if (selectedFormat === "baseline-inventory") {
-        setBaselineDate(detectedDate);
-      }
-    }
-
-    // Auto-detect format from filename if obvious
-    const lowerName = name.toLowerCase();
+    // CRITICAL: NGÀY HOÀN TOÀN DO USER TỰ CHỌN, HỆ THỐNG TUYỆT ĐỐI KHÔNG TỰ ĐOÁN HAY CAN THIỆP DỰA THEO TÊN FILE.
+    // Tự động nhận diện định dạng file (nhập/xuất/tồn) nếu tên file thể hiện rõ:
+    const lowerName = selectedFile.name.toLowerCase();
     if (lowerName.includes("inbound") && selectedFormat !== "inbound") {
       setSelectedFormat("inbound");
     } else if (lowerName.includes("outbound") && selectedFormat !== "outbound") {
       setSelectedFormat("outbound");
     } else if ((lowerName.includes("hôm nay") || lowerName.includes("test") || lowerName.includes("mới")) && lowerName.includes("inventory")) {
       setSelectedFormat("inventory");
-      if (dmy) {
-        const day = dmy[1].padStart(2, "0");
-        const month = dmy[2].padStart(2, "0");
-        const year = dmy[3] || "2026";
-        setSnapshotDate(`${year}-${month}-${day}`);
-      }
     } else if ((lowerName.includes("hôm qua") || lowerName.includes("qua") || lowerName.includes("baseline") || lowerName.includes("đầu kỳ")) && lowerName.includes("inventory")) {
       setSelectedFormat("baseline-inventory");
-      if (dmy) {
-        const day = dmy[1].padStart(2, "0");
-        const month = dmy[2].padStart(2, "0");
-        const year = dmy[3] || "2026";
-        setBaselineDate(`${year}-${month}-${day}`);
-      }
     }
 
     const reader = new FileReader();
@@ -187,6 +169,40 @@ export default function UploadDataPage() {
     e.preventDefault();
   };
 
+  const handleConfirmReset = async () => {
+    setIsResetting(true);
+    try {
+      const res = await fetch("/api/reset-data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scope: resetScope,
+          includeMasterData: resetIncludeMaster
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        toast.success("✓ ĐÃ XÓA SẠCH DỮ LIỆU CŨ THÀNH CÔNG!", {
+          description: data.message || "Database đã được dọn sạch và sẵn sàng nhận bộ dữ liệu mới.",
+          duration: 7000
+        });
+        setShowResetModal(false);
+        setFile(null);
+        setPreviewRows([]);
+        setUploadResult(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        fetchCurrentInventory();
+      } else {
+        toast.error(data.error || "Không thể xóa dữ liệu cũ");
+      }
+    } catch (err) {
+      toast.error("Lỗi khi kết nối máy chủ để xóa dữ liệu");
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
   const handleUpload = async () => {
     if (!file) {
       toast.error("Vui lòng chọn một file Excel hoặc CSV trước khi tải lên.");
@@ -194,12 +210,12 @@ export default function UploadDataPage() {
     }
 
     if (selectedFormat === "inventory" && (!snapshotDate || snapshotDate.trim() === "")) {
-      toast.error("Bắt buộc phải chọn Ngày chốt tồn kho mới trước khi tải lên!");
+      toast.error("Bắt buộc bạn phải tự chọn Ngày chốt tồn kho mới trước khi tải lên!");
       return;
     }
 
     if (selectedFormat === "baseline-inventory" && (!baselineDate || baselineDate.trim() === "")) {
-      toast.error("Bắt buộc phải chọn Ngày chốt tồn kho cũ trước khi tải lên!");
+      toast.error("Bắt buộc bạn phải tự chọn Ngày chốt tồn kho cũ trước khi tải lên!");
       return;
     }
 
@@ -224,11 +240,20 @@ export default function UploadDataPage() {
       if (res.ok) {
         setUploadResult(data);
         fetchCurrentInventory();
+
+        // THÔNG BÁO ĐÃ ĐỐI SOÁT XONG RÕ RÀNG KHI XỬ LÝ XONG:
         if (data.isMatched === false) {
-          toast.warning("Dữ liệu tồn kho tải lên có sự chênh lệch so với lịch sử tính toán!");
+          toast.warning("✓ ĐÃ ĐỐI SOÁT XONG: Phát hiện chênh lệch so với dữ liệu lịch sử!", {
+            description: data.message,
+            duration: 9000
+          });
         } else {
-          toast.success(data.message || "Tải lên và xử lý dữ liệu thành công!");
+          toast.success("✓ ĐÃ ĐỐI SOÁT XONG!", {
+            description: data.message || "Dữ liệu đã được kiểm tra, đối soát và nạp thành công vào hệ thống.",
+            duration: 9000
+          });
         }
+
         // Reset file selection
         setFile(null);
         setPreviewRows([]);
@@ -265,6 +290,16 @@ export default function UploadDataPage() {
         </div>
 
         <div className="flex items-center space-x-2">
+          {/* Nút Reset Dữ Liệu Cũ */}
+          <button
+            type="button"
+            onClick={() => setShowResetModal(true)}
+            className="flex items-center px-4 py-2.5 bg-rose-50 border border-rose-200 text-rose-700 font-bold rounded-2xl hover:bg-rose-100 hover:border-rose-300 transition-all shadow-sm active:scale-95 text-sm"
+          >
+            <Trash2 className="w-4 h-4 mr-2 text-rose-600" />
+            Reset Dữ Liệu Cũ
+          </button>
+
           <Link
             href="/check-lech-ton"
             className="flex items-center px-4 py-2.5 bg-white border border-slate-200 text-slate-700 font-bold rounded-2xl hover:bg-slate-50 transition-all shadow-sm active:scale-95 text-sm"
@@ -333,7 +368,7 @@ export default function UploadDataPage() {
             </div>
           </div>
 
-          {/* Date Picker Requirement for Inventory and Baseline */}
+          {/* User Manually Selects Dates - System does NOT interfere */}
           {selectedFormat === "inventory" && (
             <div className={`flex items-center px-4 py-2.5 rounded-2xl border transition-all ${
               !snapshotDate 
@@ -350,13 +385,27 @@ export default function UploadDataPage() {
                     * BẮT BUỘC CHỌN
                   </span>
                 </span>
-                <input
-                  type="date"
-                  value={snapshotDate}
-                  onChange={(e) => setSnapshotDate(e.target.value)}
-                  required
-                  className="mt-1 font-bold text-slate-900 text-sm outline-none bg-transparent cursor-pointer block"
-                />
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    type="date"
+                    value={snapshotDate}
+                    onChange={(e) => setSnapshotDate(e.target.value)}
+                    required
+                    className="font-bold text-slate-900 text-sm outline-none bg-white px-2 py-0.5 rounded-lg border border-slate-300 cursor-pointer block hover:border-emerald-500 focus:border-emerald-500"
+                  />
+                  {snapshotDate && (
+                    <button
+                      type="button"
+                      onClick={() => setSnapshotDate("")}
+                      className="text-[11px] text-slate-400 hover:text-rose-600 font-semibold underline"
+                    >
+                      Xóa
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-500 mt-0.5 italic">
+                  * User tự chọn ngày — Hệ thống không tự động can thiệp
+                </p>
               </div>
             </div>
           )}
@@ -377,13 +426,27 @@ export default function UploadDataPage() {
                     * BẮT BUỘC CHỌN
                   </span>
                 </span>
-                <input
-                  type="date"
-                  value={baselineDate}
-                  onChange={(e) => setBaselineDate(e.target.value)}
-                  required
-                  className="mt-1 font-bold text-slate-900 text-sm outline-none bg-transparent cursor-pointer block"
-                />
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    type="date"
+                    value={baselineDate}
+                    onChange={(e) => setBaselineDate(e.target.value)}
+                    required
+                    className="font-bold text-slate-900 text-sm outline-none bg-white px-2 py-0.5 rounded-lg border border-slate-300 cursor-pointer block hover:border-purple-500 focus:border-purple-500"
+                  />
+                  {baselineDate && (
+                    <button
+                      type="button"
+                      onClick={() => setBaselineDate("")}
+                      className="text-[11px] text-slate-400 hover:text-rose-600 font-semibold underline"
+                    >
+                      Xóa
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-500 mt-0.5 italic">
+                  * User tự chọn ngày — Hệ thống không tự động can thiệp
+                </p>
               </div>
             </div>
           )}
@@ -563,9 +626,25 @@ export default function UploadDataPage() {
                   ? "bg-rose-50/70 border-rose-300 text-rose-950 shadow-lg shadow-rose-900/5"
                   : uploadResult.isMatched === true
                   ? "bg-emerald-50/80 border-emerald-300 text-emerald-950 shadow-lg shadow-emerald-900/5"
-                  : "bg-slate-50 border-slate-200 text-slate-800"
+                  : "bg-blue-50/80 border-blue-300 text-blue-950 shadow-lg shadow-blue-900/5"
               }`}
             >
+              {/* Highlight Notification: ĐÃ ĐỐI SOÁT XONG */}
+              <div className="flex flex-wrap items-center gap-2 mb-4 pb-3 border-b border-slate-200/60">
+                <span className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider text-white shadow-sm flex items-center gap-1.5 ${
+                  uploadResult.isMatched === false ? "bg-rose-600" : "bg-emerald-600"
+                }`}>
+                  <CheckCircle2 className="w-4 h-4" />
+                  ĐÃ ĐỐI SOÁT XONG
+                </span>
+                <span className="text-xs font-bold text-slate-600">
+                  {uploadResult.format === "inbound" && "• Nhập Kho (Inbound)"}
+                  {uploadResult.format === "outbound" && "• Xuất Kho (Outbound)"}
+                  {uploadResult.format === "inventory" && `• Tồn Kho Mới Nhất (${uploadResult.snapshotDate || ""})`}
+                  {uploadResult.format === "baseline-inventory" && `• Tồn Kho Cũ Đầu Kỳ (${uploadResult.snapshotDate || ""})`}
+                </span>
+              </div>
+
               <div className="flex flex-col md:flex-row items-start justify-between gap-4">
                 <div className="flex items-start space-x-4">
                   <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-sm ${
@@ -702,6 +781,153 @@ export default function UploadDataPage() {
           )}
         </div>
       </div>
+
+      {/* Modal Xác Nhận Reset / Xóa Dữ Liệu Cũ */}
+      {showResetModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center text-rose-600 shadow-sm">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Reset & Xóa Dữ Liệu Cũ</h3>
+                  <p className="text-xs text-slate-500">Dọn sạch database để nạp và đối soát lại từ đầu</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowResetModal(false)}
+                className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="my-5 space-y-4">
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Chọn phạm vi dữ liệu muốn xóa:
+              </p>
+
+              <div className="space-y-2.5">
+                <label className={`flex items-start p-3.5 rounded-2xl border cursor-pointer transition-all ${
+                  resetScope === "all"
+                    ? "bg-rose-50/80 border-rose-300 ring-2 ring-rose-200"
+                    : "bg-slate-50 border-slate-200 hover:bg-slate-100/70"
+                }`}>
+                  <input
+                    type="radio"
+                    name="resetScope"
+                    value="all"
+                    checked={resetScope === "all"}
+                    onChange={() => setResetScope("all")}
+                    className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                  />
+                  <div className="ml-3 text-xs">
+                    <span className="font-bold text-slate-900 block">Xóa toàn bộ (Khuyên dùng khi bắt đầu lại)</span>
+                    <span className="text-slate-500 leading-relaxed block mt-0.5">
+                      Xóa sạch dữ liệu Nhập kho, Xuất kho, Tồn kho cũ (Baseline) và Tồn kho mới nhất.
+                    </span>
+                  </div>
+                </label>
+
+                <label className={`flex items-start p-3.5 rounded-2xl border cursor-pointer transition-all ${
+                  resetScope === "transactions"
+                    ? "bg-rose-50/80 border-rose-300 ring-2 ring-rose-200"
+                    : "bg-slate-50 border-slate-200 hover:bg-slate-100/70"
+                }`}>
+                  <input
+                    type="radio"
+                    name="resetScope"
+                    value="transactions"
+                    checked={resetScope === "transactions"}
+                    onChange={() => setResetScope("transactions")}
+                    className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                  />
+                  <div className="ml-3 text-xs">
+                    <span className="font-bold text-slate-900 block">Chỉ xóa giao dịch Nhập / Xuất</span>
+                    <span className="text-slate-500 leading-relaxed block mt-0.5">
+                      Xóa bảng Nhập kho (Inbound) và Xuất kho (Outbound), giữ nguyên các bảng Tồn kho.
+                    </span>
+                  </div>
+                </label>
+
+                <label className={`flex items-start p-3.5 rounded-2xl border cursor-pointer transition-all ${
+                  resetScope === "inventory"
+                    ? "bg-rose-50/80 border-rose-300 ring-2 ring-rose-200"
+                    : "bg-slate-50 border-slate-200 hover:bg-slate-100/70"
+                }`}>
+                  <input
+                    type="radio"
+                    name="resetScope"
+                    value="inventory"
+                    checked={resetScope === "inventory"}
+                    onChange={() => setResetScope("inventory")}
+                    className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                  />
+                  <div className="ml-3 text-xs">
+                    <span className="font-bold text-slate-900 block">Chỉ xóa dữ liệu Tồn kho</span>
+                    <span className="text-slate-500 leading-relaxed block mt-0.5">
+                      Xóa bảng Tồn kho cũ (Baseline), Tồn kho mới (Snapshot) và Tồn kho hiện hành.
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+              <div className="pt-2">
+                <label className="flex items-center space-x-2 text-xs cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={resetIncludeMaster}
+                    onChange={(e) => setResetIncludeMaster(e.target.checked)}
+                    className="rounded text-rose-600 focus:ring-rose-500"
+                  />
+                  <span className="text-slate-700 font-semibold">
+                    Xóa cả danh mục sản phẩm (Master Data) để làm sạch hoàn toàn
+                  </span>
+                </label>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 flex items-start space-x-2.5 text-xs text-amber-900">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <p>
+                  <strong>Lưu ý:</strong> Hành động này sẽ xóa các bản ghi đã chọn khỏi cơ sở dữ liệu. Sau khi xóa, bạn có thể tải lên lại file Excel mới để hệ thống đối soát từ đầu.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end space-x-3 pt-4 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowResetModal(false)}
+                disabled={isResetting}
+                className="px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmReset}
+                disabled={isResetting}
+                className="flex items-center px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-md shadow-rose-600/20 transition-all active:scale-95 disabled:opacity-50"
+              >
+                {isResetting ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                    Đang xóa dữ liệu...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Xác Nhận Xóa Dữ Liệu
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
