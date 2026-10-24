@@ -6,12 +6,11 @@ import {
   ArrowDownToLine, 
   ArrowUpFromLine, 
   PackageSearch, 
-  Database,
-  UploadCloud,
-  Box,
-  FileBarChart,
-  Activity,
-  CheckCircle2
+  UploadCloud, 
+  Scale,
+  FileBarChart, 
+  Activity, 
+  CheckCircle2 
 } from "lucide-react";
 
 export default function Sidebar({ user }: { user?: { name: string, role: string } | null }) {
@@ -23,7 +22,7 @@ export default function Sidebar({ user }: { user?: { name: string, role: string 
     { name: "Outbound", href: "/outbound", icon: ArrowUpFromLine, subtitle: "Xuất kho" },
     { name: "Inventory", href: "/inventory", icon: PackageSearch, subtitle: "Tồn kho" },
     { name: "Report", href: "/report", icon: FileBarChart, subtitle: "Báo cáo NXT" },
-    { name: "Master Data", href: "/master-data", icon: Database, subtitle: "Danh mục SKU" },
+    { name: "Check lệch tồn", href: "/check-lech-ton", icon: Scale, subtitle: "Đối soát chênh lệch kho" },
     { name: "Activity Log", href: "/activity-log", icon: Activity, subtitle: "Nhật ký" },
   ];
 
@@ -35,17 +34,17 @@ export default function Sidebar({ user }: { user?: { name: string, role: string 
       
       <div className="p-8 pb-4 relative z-10">
         <div className="flex items-center space-x-3 mb-2">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-500/30">
-            <Box className="w-6 h-6 text-white" />
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+            <FileBarChart className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h1 className="text-2xl font-black tracking-tight leading-none">
-              POSM<span className="text-emerald-400">.Pro</span>
+            <h1 className="text-2xl font-black tracking-tight leading-none text-white">
+              Danone <span className="text-emerald-400">report</span>
             </h1>
             <span className="text-[10px] font-bold text-emerald-400/80 uppercase tracking-widest">Danone Logistics</span>
           </div>
         </div>
-        <p className="text-xs text-slate-400 font-medium pl-13">Materials & Stock System</p>
+        <p className="text-xs text-slate-400 font-medium pl-13">Materials & Stock Report System</p>
       </div>
 
       <nav className="flex-1 px-4 py-4 space-y-1.5 overflow-y-auto relative z-10">

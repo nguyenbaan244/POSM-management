@@ -64,6 +64,7 @@ model Inbound {
   sku       String
   descr    String
   quantity Int
+  batch    String?   @default("")
   status   String?
   remark   String?
   createdBy String  @default("System")
@@ -78,9 +79,36 @@ model Outbound {
   sku       String
   descr    String
   quantity Int
+  batch    String?   @default("")
   status   String?
   remark   String?
   createdBy String  @default("System")
+}
+
+model BaselineInventory {
+  id        Int      @id @default(autoincrement())
+  date      DateTime
+  account   String   @default("Danone")
+  sku       String
+  descr     String
+  batch     String   @default("")
+  quantity  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([date, account, sku, batch])
+}
+
+model LatestInventorySnapshot {
+  id        Int      @id @default(autoincrement())
+  date      DateTime
+  account   String   @default("Danone")
+  sku       String
+  descr     String
+  batch     String   @default("")
+  quantity  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([date, account, sku, batch])
 }
 
 model ActionLog {
@@ -91,4 +119,5 @@ model ActionLog {
   details   String
   createdAt DateTime @default(now())
 }
+
 

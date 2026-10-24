@@ -1,30 +1,33 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Link from "next/link";
 import { 
   UploadCloud, 
   FileSpreadsheet, 
   ArrowDownToLine, 
   ArrowUpFromLine, 
   PackageSearch, 
-  Database, 
+  Archive, 
   CheckCircle2, 
-  AlertCircle, 
+  AlertTriangle, 
   Download, 
-  FileCheck,
-  RefreshCw,
-  FolderUp,
-  Info
+  RefreshCw, 
+  FolderUp, 
+  Info,
+  Calendar,
+  Scale,
+  ArrowRight
 } from "lucide-react";
 import { toast } from "sonner";
 import * as xlsx from "xlsx";
 
-type UploadFormat = "inbound" | "outbound" | "inventory" | "master-data";
-type UploadMode = "append" | "replace";
+type UploadFormat = "inbound" | "outbound" | "inventory" | "baseline-inventory";
 
 export default function UploadDataPage() {
   const [selectedFormat, setSelectedFormat] = useState<UploadFormat>("inbound");
-  const [uploadMode, setUploadMode] = useState<UploadMode>("append");
+  const [snapshotDate, setSnapshotDate] = useState<string>("2026-10-23");
+  const [baselineDate, setBaselineDate] = useState<string>("2026-10-01");
   const [file, setFile] = useState<File | null>(null);
   const [previewRows, setPreviewRows] = useState<any[]>([]);
   const [detectedColumns, setDetectedColumns] = useState<string[]>([]);
@@ -56,6 +59,7 @@ export default function UploadDataPage() {
     icon: any;
     columns: string[];
     description: string;
+    badge?: string;
   }> = {
     "inbound": {
       title: "Nhập Kho (Inbound)",
@@ -64,7 +68,7 @@ export default function UploadDataPage() {
       badgeColor: "bg-blue-50 text-blue-700 border-blue-200",
       icon: ArrowDownToLine,
       columns: ["PO Number", "ReceiptKey", "Date Received", "Sku", "DESCR", "Qty Piece", "Supplier", "Batch"],
-      description: "Hỗ trợ file Excel theo mẫu Inbound chuẩn (PO, ReceiptKey, Ngày nhập, Mã SKU, Tên SP, SL Nhập, Lô...)"
+      description: "Tự động đối soát dữ liệu với database: Giao dịch đã có sẽ tự động bỏ qua, chỉ ghi thêm các dòng nhập mới."
     },
     "outbound": {
       title: "Xuất Kho (Outbound)",
@@ -73,25 +77,27 @@ export default function UploadDataPage() {
       badgeColor: "bg-orange-50 text-orange-700 border-orange-200",
       icon: ArrowUpFromLine,
       columns: ["ShipDate", "Sale Order #", "Customer PO", "Sku", "Description", "Total Qty Pcs", "Batch", "Remark"],
-      description: "Hỗ trợ file Excel theo mẫu Outbound chuẩn (Ngày xuất, Số đơn SO/PO, SKU, Tên SP, SL Xuất, Lô...)"
+      description: "Tự động đối soát dữ liệu với database: Giao dịch đã có sẽ tự động bỏ qua, chỉ ghi thêm các dòng xuất mới."
     },
     "inventory": {
-      title: "Tồn Kho (Inventory)",
-      subtitle: "Dữ liệu kiểm kê tồn kho theo từng vị trí và SKU",
+      title: "Tồn Kho Mới Nhất (Inventory)",
+      subtitle: "Kiểm kê tồn kho thực tế mới nhất (Không bắt buộc upload)",
       color: "from-emerald-500 to-teal-600",
       badgeColor: "bg-emerald-50 text-emerald-700 border-emerald-200",
+      badge: "Không bắt buộc",
       icon: PackageSearch,
       columns: ["Sku", "DESCR", "Qty", "Loc", "BatchNo"],
-      description: "Hỗ trợ file tồn kho chi tiết hoặc tổng hợp. Hệ thống sẽ tự động gộp tổng tồn theo từng mã SKU."
+      description: "Hệ thống tự động tính toán tồn kho theo lịch sử. Nếu bạn upload tồn kho mới, hệ thống sẽ kiểm tra khớp lệnh lịch sử."
     },
-    "master-data": {
-      title: "Danh Mục SKU (Master Data)",
-      subtitle: "Danh mục quy chuẩn mã hàng, tên sản phẩm và tài khoản",
+    "baseline-inventory": {
+      title: "Tồn Kho Cũ (Baseline / Đầu Kỳ)",
+      subtitle: "Dữ liệu tồn kho ban đầu làm căn cứ tính toán NXT và đối soát",
       color: "from-purple-600 to-indigo-600",
       badgeColor: "bg-purple-50 text-purple-700 border-purple-200",
-      icon: Database,
-      columns: ["SKU", "Description", "Account"],
-      description: "Quản lý mã sản phẩm (SKU) và tên mô tả chính thức để phục vụ tra cứu tự động trong toàn bộ hệ thống."
+      badge: "Mốc Đầu Kỳ",
+      icon: Archive,
+      columns: ["Sku", "DESCR", "Qty", "BatchNo", "Loc"],
+      description: "Thay thế danh mục SKU: Thiết lập số lượng tồn kho ban đầu theo ngày để tính toán NXT và Check lệch tồn."
     }
   };
 
@@ -152,7 +158,12 @@ export default function UploadDataPage() {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("format", selectedFormat);
-    formData.append("mode", uploadMode);
+    
+    if (selectedFormat === "inventory") {
+      formData.append("snapshotDate", snapshotDate);
+    } else if (selectedFormat === "baseline-inventory") {
+      formData.append("snapshotDate", baselineDate);
+    }
 
     try {
       const res = await fetch("/api/upload", {
@@ -164,7 +175,11 @@ export default function UploadDataPage() {
       if (res.ok) {
         setUploadResult(data);
         fetchCurrentInventory();
-        toast.success(data.message || "Tải lên và xử lý dữ liệu thành công!");
+        if (data.isMatched === false) {
+          toast.warning("Dữ liệu tồn kho tải lên có sự chênh lệch so với lịch sử tính toán!");
+        } else {
+          toast.success(data.message || "Tải lên và xử lý dữ liệu thành công!");
+        }
         // Reset file selection
         setFile(null);
         setPreviewRows([]);
@@ -177,10 +192,6 @@ export default function UploadDataPage() {
     } finally {
       setIsUploading(false);
     }
-  };
-
-  const handleDownloadTemplate = (format: UploadFormat) => {
-    window.open(`/api/upload/template?type=${format}`, "_blank");
   };
 
   const currentConfig = formatConfig[selectedFormat];
@@ -199,19 +210,19 @@ export default function UploadDataPage() {
               Trung Tâm Tải Lên Dữ Liệu
             </h1>
             <p className="text-slate-500 font-medium">
-              Import & cập nhật dữ liệu Inbound, Outbound, Tồn kho & Danh mục SKU theo định dạng Excel
+              Đối soát tự động Nhập Kho, Xuất Kho, Tồn Kho Cũ (Đầu Kỳ) & Tồn Kho Mới Nhất
             </p>
           </div>
         </div>
 
         <div className="flex items-center space-x-2">
-          <button
-            onClick={() => handleDownloadTemplate(selectedFormat)}
+          <Link
+            href="/check-lech-ton"
             className="flex items-center px-4 py-2.5 bg-white border border-slate-200 text-slate-700 font-bold rounded-2xl hover:bg-slate-50 transition-all shadow-sm active:scale-95 text-sm"
           >
-            <Download className="w-4 h-4 mr-2 text-emerald-600" />
-            Tải File Mẫu (.xlsx)
-          </button>
+            <Scale className="w-4 h-4 mr-2 text-emerald-600" />
+            Xem Check Lệch Tồn
+          </Link>
         </div>
       </div>
 
@@ -241,13 +252,18 @@ export default function UploadDataPage() {
                 >
                   <IconComponent className="w-6 h-6" />
                 </div>
+                {cfg.badge && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                    {cfg.badge}
+                  </span>
+                )}
                 {isSelected && (
                   <span className="flex items-center text-xs font-bold px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full">
                     <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600" /> Đang chọn
                   </span>
                 )}
               </div>
-              <h3 className="text-lg font-bold text-slate-800 mb-1">{cfg.title}</h3>
+              <h3 className="text-base font-bold text-slate-800 mb-1">{cfg.title}</h3>
               <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">{cfg.subtitle}</p>
             </div>
           );
@@ -268,31 +284,43 @@ export default function UploadDataPage() {
             </div>
           </div>
 
-          {/* Mode Switcher */}
-          <div className="flex items-center bg-white p-1 rounded-2xl border border-slate-200 shadow-sm self-start sm:self-auto">
-            <button
-              type="button"
-              onClick={() => setUploadMode("append")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                uploadMode === "append"
-                  ? "bg-slate-900 text-white shadow-sm"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Nối tiếp (Append)
-            </button>
-            <button
-              type="button"
-              onClick={() => setUploadMode("replace")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                uploadMode === "replace"
-                  ? "bg-rose-600 text-white shadow-sm"
-                  : "text-slate-600 hover:text-rose-600"
-              }`}
-            >
-              Ghi đè (Replace)
-            </button>
-          </div>
+          {/* Date Picker Requirement for Inventory and Baseline */}
+          {selectedFormat === "inventory" && (
+            <div className="flex items-center bg-white px-4 py-2 rounded-2xl border border-emerald-200 shadow-sm">
+              <Calendar className="w-4 h-4 mr-2 text-emerald-600" />
+              <div className="text-xs">
+                <span className="font-bold text-slate-700 block">Xác nhận ngày chốt tồn kho mới:</span>
+                <input
+                  type="date"
+                  value={snapshotDate}
+                  onChange={(e) => setSnapshotDate(e.target.value)}
+                  className="mt-0.5 font-bold text-emerald-700 outline-none bg-transparent text-xs"
+                />
+              </div>
+            </div>
+          )}
+
+          {selectedFormat === "baseline-inventory" && (
+            <div className="flex items-center bg-white px-4 py-2 rounded-2xl border border-purple-200 shadow-sm">
+              <Calendar className="w-4 h-4 mr-2 text-purple-600" />
+              <div className="text-xs">
+                <span className="font-bold text-slate-700 block">Xác nhận ngày chốt tồn kho cũ:</span>
+                <input
+                  type="date"
+                  value={baselineDate}
+                  onChange={(e) => setBaselineDate(e.target.value)}
+                  className="mt-0.5 font-bold text-purple-700 outline-none bg-transparent text-xs"
+                />
+              </div>
+            </div>
+          )}
+
+          {(selectedFormat === "inbound" || selectedFormat === "outbound") && (
+            <div className="flex items-center bg-emerald-50/80 px-4 py-2 rounded-2xl border border-emerald-200 text-xs text-emerald-800 font-semibold">
+              <CheckCircle2 className="w-4 h-4 mr-1.5 text-emerald-600 shrink-0" />
+              Tự động lọc trùng • Không ghi đè dữ liệu cũ
+            </div>
+          )}
         </div>
 
         {/* Drop Zone */}
@@ -335,15 +363,25 @@ export default function UploadDataPage() {
             </div>
           </div>
 
-          {/* Mode Warning Notice */}
-          <div className="mt-4 p-4 rounded-2xl bg-amber-50/60 border border-amber-200 flex items-start space-x-3 text-xs text-amber-800">
-            <Info className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          {/* Smart Notice */}
+          <div className="mt-4 p-4 rounded-2xl bg-slate-50 border border-slate-200 flex items-start space-x-3 text-xs text-slate-700">
+            <Info className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
             <div>
-              <p className="font-bold">Chế độ xử lý: {uploadMode === "append" ? "Nối tiếp (Append)" : "Ghi đè (Replace)"}</p>
-              <p className="text-amber-700 mt-0.5">
-                {uploadMode === "append" 
-                  ? "Dữ liệu mới sẽ được thêm vào hệ thống. Tồn kho tự động được cập nhật tương ứng theo các giao dịch mới." 
-                  : "CẢNH BÁO: Chế độ 'Ghi đè' sẽ xóa toàn bộ các bản ghi cũ của mục này và thay thế hoàn toàn bằng dữ liệu trong file bạn tải lên."}
+              <p className="font-bold text-slate-900">
+                {selectedFormat === "inbound" && "Quy tắc Nhập Kho:"}
+                {selectedFormat === "outbound" && "Quy tắc Xuất Kho:"}
+                {selectedFormat === "inventory" && "Quy tắc Tồn Kho Mới Nhất (Tùy chọn):"}
+                {selectedFormat === "baseline-inventory" && "Quy tắc Tồn Kho Cũ (Đầu Kỳ):"}
+              </p>
+              <p className="text-slate-600 mt-0.5">
+                {selectedFormat === "inbound" &&
+                  "Hệ thống sẽ đối chiếu với database: Những giao dịch đã có sẵn sẽ được bỏ qua, chỉ ghi thêm các dòng nhập mới. Tồn kho tự động tăng tương ứng."}
+                {selectedFormat === "outbound" &&
+                  "Hệ thống sẽ đối chiếu với database: Những giao dịch đã có sẵn sẽ được bỏ qua, chỉ ghi thêm các dòng xuất mới. Tồn kho tự động trừ tương ứng."}
+                {selectedFormat === "inventory" &&
+                  "Bạn không bắt buộc phải upload tồn kho vì hệ thống đã tự động tính toán từ nhập/xuất và tồn cũ. Nếu bạn upload tồn kho mới, hệ thống sẽ đối soát xem có khớp với lịch sử hay không và báo chi tiết nếu có lệch."}
+                {selectedFormat === "baseline-inventory" &&
+                  "Thay thế nút Danh mục SKU: Upload dữ liệu tồn kho cũ tại ngày bạn chọn để thiết lập số dư ban đầu, làm căn cứ tính toán xuất nhập tồn toàn hệ thống."}
               </p>
             </div>
           </div>
@@ -385,12 +423,12 @@ export default function UploadDataPage() {
                     {isUploading ? (
                       <>
                         <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                        Đang xử lý...
+                        Đang đối soát & xử lý...
                       </>
                     ) : (
                       <>
                         <UploadCloud className="w-4 h-4 mr-2" />
-                        Bắt đầu Tải Lên & Xử Lý
+                        Bắt Đầu Tải Lên & Đối Soát
                       </>
                     )}
                   </button>
@@ -432,138 +470,71 @@ export default function UploadDataPage() {
             </div>
           )}
 
-          {/* Success Banner */}
+          {/* Success / Discrepancy Banner */}
           {uploadResult && (
-            <div className="mt-6 p-6 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-start space-x-4 animate-in">
-              <CheckCircle2 className="w-7 h-7 text-emerald-600 shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <h4 className="text-base font-bold text-emerald-900">
-                  Xử lý file hoàn tất thành công!
-                </h4>
-                <p className="text-sm text-emerald-800 mt-1">
-                  {uploadResult.message}
-                </p>
-                <div className="flex gap-4 mt-3 text-xs font-semibold text-emerald-700">
-                  <span>Số bản ghi: {uploadResult.importedCount}</span>
-                  <span>Tổng số lượng: {uploadResult.totalQty?.toLocaleString()}</span>
-                  <span>Chế độ: {uploadResult.mode}</span>
+            <div
+              className={`mt-6 p-6 rounded-2xl border flex flex-col md:flex-row items-start justify-between gap-4 animate-in ${
+                uploadResult.isMatched === false
+                  ? "bg-amber-50 border-amber-300 text-amber-900"
+                  : "bg-emerald-50 border-emerald-200 text-emerald-900"
+              }`}
+            >
+              <div className="flex items-start space-x-4">
+                {uploadResult.isMatched === false ? (
+                  <AlertTriangle className="w-7 h-7 text-amber-600 shrink-0 mt-0.5" />
+                ) : (
+                  <CheckCircle2 className="w-7 h-7 text-emerald-600 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <h4 className="text-base font-bold">
+                    {uploadResult.isMatched === false
+                      ? "Đã lưu tồn kho - Phát hiện chênh lệch so với lịch sử!"
+                      : "Xử lý file hoàn tất thành công!"}
+                  </h4>
+                  <p className="text-sm mt-1">{uploadResult.message}</p>
+                  <div className="flex flex-wrap gap-4 mt-3 text-xs font-semibold">
+                    {uploadResult.importedCount !== undefined && (
+                      <span>Số bản ghi mới thêm: {uploadResult.importedCount}</span>
+                    )}
+                    {uploadResult.skippedCount !== undefined && (
+                      <span className="text-slate-600">Đã có sẵn (bỏ qua): {uploadResult.skippedCount}</span>
+                    )}
+                    {uploadResult.totalQty !== undefined && (
+                      <span>Tổng số lượng: {uploadResult.totalQty?.toLocaleString()}</span>
+                    )}
+                  </div>
+
+                  {/* Discrepancy Details Preview */}
+                  {uploadResult.discrepancies && uploadResult.discrepancies.length > 0 && (
+                    <div className="mt-4 p-3 bg-white/80 rounded-xl border border-amber-200 text-xs">
+                      <p className="font-bold text-amber-900 mb-1">
+                        Chi tiết các mã SKU bị lệch ({uploadResult.discrepancies.length} SKU):
+                      </p>
+                      <ul className="space-y-1 text-slate-700">
+                        {uploadResult.discrepancies.slice(0, 5).map((d: any, idx: number) => (
+                          <li key={idx} className="flex justify-between max-w-md">
+                            <span className="font-semibold">{d.sku} ({d.descr}):</span>
+                            <span>
+                              Tải lên: <b>{d.uploaded.toLocaleString()}</b> | Tính toán: <b>{d.expected.toLocaleString()}</b> | Lệch: <b className="text-rose-600">{d.variance > 0 ? `+${d.variance.toLocaleString()}` : d.variance.toLocaleString()}</b>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               </div>
+
+              {uploadResult.isMatched === false && (
+                <Link
+                  href="/check-lech-ton"
+                  className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs flex items-center shadow-md shrink-0 transition-colors"
+                >
+                  Đối Soát Chi Tiết <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
+                </Link>
+              )}
             </div>
           )}
-        </div>
-      </div>
-
-      {/* Real-time SKU & Quantity Overview Table */}
-      {currentInventory.length > 0 && (
-        <div className="bg-white rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100 overflow-hidden mb-8">
-          <div className="p-6 border-b border-slate-100 bg-slate-50/60 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-            <div>
-              <h3 className="text-lg font-bold text-slate-800 flex items-center">
-                <PackageSearch className="w-5 h-5 mr-2 text-emerald-600" />
-                Bảng Thống Kê Dữ Liệu Theo SKU & Số Lượng Tồn Kho Hiện Tại
-              </h3>
-              <p className="text-xs text-slate-500">Đối soát trực quan số lượng tồn thực tế của từng mã sản phẩm Danone</p>
-            </div>
-            <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl">
-              Tổng tồn kho: {currentInventory.reduce((s, x) => s + (x.quantity || 0), 0).toLocaleString()} chiếc
-            </span>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-sm">
-              <thead>
-                <tr className="bg-slate-50/70 border-b border-slate-200 text-slate-500 text-xs uppercase tracking-wider font-semibold">
-                  <th className="py-3.5 px-6">Mã SKU</th>
-                  <th className="py-3.5 px-6">Tên Sản Phẩm (Mô Tả)</th>
-                  <th className="py-3.5 px-6 text-right">Số Lượng Tồn</th>
-                  <th className="py-3.5 px-6 text-right">Tỷ Trọng (%)</th>
-                  <th className="py-3.5 px-6 text-center">Trạng Thái</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-medium">
-                {currentInventory.map((item, idx) => {
-                  const total = currentInventory.reduce((s, x) => s + (x.quantity || 0), 0);
-                  const share = total > 0 ? ((item.quantity / total) * 100).toFixed(1) : 0;
-                  return (
-                    <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="py-3.5 px-6 font-bold text-slate-900">{item.sku}</td>
-                      <td className="py-3.5 px-6 text-slate-600 max-w-md truncate" title={item.descr}>{item.descr}</td>
-                      <td className="py-3.5 px-6 text-right font-black text-slate-900">{item.quantity.toLocaleString()}</td>
-                      <td className="py-3.5 px-6 text-right font-semibold text-slate-500">{share}%</td>
-                      <td className="py-3.5 px-6 text-center">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                          Sẵn Sàng
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr className="bg-slate-900 text-white font-bold text-sm">
-                  <td colSpan={2} className="py-3.5 px-6">TỔNG CỘNG TẤT CẢ SKU</td>
-                  <td className="py-3.5 px-6 text-right font-black text-emerald-400">
-                    {currentInventory.reduce((s, x) => s + (x.quantity || 0), 0).toLocaleString()}
-                  </td>
-                  <td className="py-3.5 px-6 text-right text-slate-300">100%</td>
-                  <td className="py-3.5 px-6 text-center text-xs text-emerald-300">Hoạt động bình thường</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Guide & Rules */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-          <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600 mb-3">
-            <ArrowDownToLine className="w-5 h-5" />
-          </div>
-          <h4 className="font-bold text-slate-800 mb-1">Mẫu Inbound</h4>
-          <p className="text-xs text-slate-500 leading-relaxed">
-            Chứa PO Number, ReceiptKey, Ngày nhập kho, Mã SKU, Số lượng sản phẩm (Qty Piece) và tên nhà cung cấp.
-          </p>
-          <button
-            onClick={() => handleDownloadTemplate("inbound")}
-            className="mt-3 text-xs font-bold text-blue-600 hover:underline flex items-center"
-          >
-            <Download className="w-3.5 h-3.5 mr-1" /> Tải mẫu Inbound (.xlsx)
-          </button>
-        </div>
-
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-          <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center text-orange-600 mb-3">
-            <ArrowUpFromLine className="w-5 h-5" />
-          </div>
-          <h4 className="font-bold text-slate-800 mb-1">Mẫu Outbound</h4>
-          <p className="text-xs text-slate-500 leading-relaxed">
-            Chứa Ngày xuất hàng (ShipDate), Sale Order #, Customer PO, Mã SKU, Số lượng xuất (Total Qty Pcs), Lô hàng.
-          </p>
-          <button
-            onClick={() => handleDownloadTemplate("outbound")}
-            className="mt-3 text-xs font-bold text-orange-600 hover:underline flex items-center"
-          >
-            <Download className="w-3.5 h-3.5 mr-1" /> Tải mẫu Outbound (.xlsx)
-          </button>
-        </div>
-
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-          <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-600 mb-3">
-            <PackageSearch className="w-5 h-5" />
-          </div>
-          <h4 className="font-bold text-slate-800 mb-1">Mẫu Tồn Kho (Inventory)</h4>
-          <p className="text-xs text-slate-500 leading-relaxed">
-            Bảng số lượng tồn theo SKU. Khi tải lên, hệ thống sẽ tự động gộp tổng theo mã SKU và cập nhật số dư kho.
-          </p>
-          <button
-            onClick={() => handleDownloadTemplate("inventory")}
-            className="mt-3 text-xs font-bold text-emerald-600 hover:underline flex items-center"
-          >
-            <Download className="w-3.5 h-3.5 mr-1" /> Tải mẫu Tồn Kho (.xlsx)
-          </button>
         </div>
       </div>
     </div>

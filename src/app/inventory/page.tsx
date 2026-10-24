@@ -15,9 +15,11 @@ import {
   CheckCircle2,
   Tag,
   Filter,
-  Calendar
+  Calendar,
+  FileDown
 } from "lucide-react";
 import { toast } from "sonner";
+import { exportToExcel } from "@/lib/excelExport";
 import { 
   PieChart, 
   Pie, 
@@ -118,6 +120,55 @@ export default function InventoryPage() {
   const totalBatchStock = useMemo(() => {
     return filteredBatches.reduce((acc, cur) => acc + cur.quantity, 0);
   }, [filteredBatches]);
+
+  const exportBatchExcel = () => {
+    if (filteredBatches.length === 0) return toast.error("Không có dữ liệu để xuất");
+    exportToExcel({
+      filename: `Ton_Kho_Chi_Tiet_Theo_Lo_${new Date().toISOString().split("T")[0]}.xlsx`,
+      sheetName: "Ton_Kho_Theo_Lo",
+      title: "BẢNG CHI TIẾT TỒN KHO THEO TỪNG MÃ SKU & LÔ HÀNG (BATCH)",
+      subtitles: [
+        `Tổng số lô: ${filteredBatches.length} | Tổng số lượng: ${totalBatchStock.toLocaleString()} chiếc`,
+        `Thời gian xuất: ${new Date().toLocaleString("vi-VN")}`
+      ],
+      data: filteredBatches,
+      columns: [
+        { header: "Mã SKU", key: "sku", width: 14 },
+        { header: "Tên Sản Phẩm", key: "descr", width: 40 },
+        { header: "Số Lô (Batch)", key: "batch", width: 18 },
+        { header: "Số Lượng Tồn", key: "quantity", width: 16, format: v => Number(v).toLocaleString() },
+        { header: "Tỷ Trọng Trong SKU (%)", key: "quantity", width: 20, format: (v, r) => {
+          const total = skuTotalMap.get(r.sku) || 0;
+          return total > 0 ? `${((v / total) * 100).toFixed(1)}%` : "0%";
+        }},
+        { header: "Hạn Dùng (EXP)", key: "expDate", width: 16, format: v => v || "Chưa rõ" }
+      ]
+    });
+    toast.success("Đã xuất file Excel tồn kho theo lô thành công!");
+  };
+
+  const exportSkuSummaryExcel = () => {
+    if (filteredData.length === 0) return toast.error("Không có dữ liệu để xuất");
+    exportToExcel({
+      filename: `Ton_Kho_Tong_Hop_SKU_${new Date().toISOString().split("T")[0]}.xlsx`,
+      sheetName: "Ton_Kho_SKU",
+      title: "BẢNG THỐNG KÊ TỔNG HỢP TỒN KHO THEO SKU",
+      subtitles: [
+        `Tổng tồn kho toàn bộ: ${totalStock.toLocaleString()} chiếc (${filteredData.length} mã SKU)`,
+        `Thời gian xuất: ${new Date().toLocaleString("vi-VN")}`
+      ],
+      data: filteredData,
+      columns: [
+        { header: "Account", key: "account", width: 14 },
+        { header: "Mã SKU", key: "sku", width: 14 },
+        { header: "Tên Sản Phẩm (Mô Tả)", key: "descr", width: 42 },
+        { header: "Số Lượng Tồn", key: "quantity", width: 18, format: v => Number(v).toLocaleString() },
+        { header: "Tỷ Trọng (%)", key: "quantity", width: 16, format: v => totalStock > 0 ? `${((v / totalStock) * 100).toFixed(1)}%` : "0%" },
+        { header: "Trạng Thái", key: "quantity", width: 16, format: v => v <= 1000 ? "Cần Bổ Sung" : "Sẵn Sàng" }
+      ]
+    });
+    toast.success("Đã xuất file Excel tổng hợp tồn kho SKU thành công!");
+  };
 
   const openEditModal = (item: any) => {
     setSelectedSku(item);
@@ -324,6 +375,13 @@ export default function InventoryPage() {
                 onChange={(e) => setBatchSearch(e.target.value)}
               />
             </div>
+
+            <button
+              onClick={exportBatchExcel}
+              className="flex items-center px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs transition-all shadow-sm active:scale-95 shrink-0"
+            >
+              <FileDown className="w-3.5 h-3.5 mr-1.5" /> Xuất Excel Theo Lô
+            </button>
           </div>
         </div>
 
@@ -428,17 +486,26 @@ export default function InventoryPage() {
             <p className="text-xs text-slate-500 font-medium">Hiện có {filteredData.length} mã sản phẩm chính</p>
           </div>
           
-          <div className="relative w-full sm:w-72">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Search className="h-4 w-4 text-slate-400" />
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <div className="relative w-full sm:w-72">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Search className="h-4 w-4 text-slate-400" />
+              </div>
+              <input
+                type="text"
+                className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none w-full text-sm font-medium shadow-sm transition-all"
+                placeholder="Tìm theo SKU hoặc tên..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
             </div>
-            <input
-              type="text"
-              className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none w-full text-sm font-medium shadow-sm transition-all"
-              placeholder="Tìm theo SKU hoặc tên..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+
+            <button
+              onClick={exportSkuSummaryExcel}
+              className="flex items-center px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition-all shadow-sm active:scale-95 shrink-0"
+            >
+              <FileDown className="w-3.5 h-3.5 mr-1.5" /> Xuất Excel SKU
+            </button>
           </div>
         </div>
 

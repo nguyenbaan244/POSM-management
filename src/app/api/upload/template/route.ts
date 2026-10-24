@@ -84,18 +84,22 @@ export async function GET(request: Request) {
           "BatchNo": "2028.07.11"
         }
       ];
-    } else if (type === "master-data") {
-      filename = "Mau_Master_Data_SKU.xlsx";
+    } else if (type === "baseline-inventory" || type === "master-data") {
+      filename = "Mau_Ton_Kho_Cu_Baseline.xlsx";
       sampleRows = [
         {
-          "SKU": "194402",
-          "Description": "APTAMIL PROFUTURA CESARBIOTIK IF 380G",
-          "Account": "Danone"
+          "Sku": "194402",
+          "DESCR": "APTAMIL PROFUTURA CESARBIOTIK IF 380G",
+          "BatchNo": "2028.07.10",
+          "Qty": 50000,
+          "Loc": "A19-113-1"
         },
         {
-          "SKU": "194403",
-          "Description": "APTAMIL PROFUTURA CESARBIOTIK IF 800G",
-          "Account": "Danone"
+          "Sku": "194403",
+          "DESCR": "APTAMIL PROFUTURA CESARBIOTIK IF 800G",
+          "BatchNo": "2028.07.11",
+          "Qty": 30000,
+          "Loc": "A19-107-2"
         }
       ];
     }

@@ -13,9 +13,11 @@ import {
   Package,
   Save,
   Trash2,
-  X
+  X,
+  FileDown
 } from "lucide-react";
 import { toast } from "sonner";
+import { exportToExcel } from "@/lib/excelExport";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { 
@@ -126,6 +128,52 @@ export default function OutboundPage() {
       remark: Array.from(g.remarks).filter(Boolean).join("; ")
     }));
   }, [items]);
+
+  const exportSkuOutboundExcel = () => {
+    if (skuStats.length === 0) return toast.error("Không có dữ liệu để xuất");
+    exportToExcel({
+      filename: `Thong_Ke_SKU_Xuat_Kho_${selectedMonth || "All"}.xlsx`,
+      sheetName: "SKU_Xuat_Kho",
+      title: "BẢNG THỐNG KÊ XUẤT KHO THEO TỪNG MÃ SKU & SỐ LƯỢNG",
+      subtitles: [
+        `Kỳ báo cáo: Tháng ${selectedMonth} | Ngày: ${selectedDate}`,
+        `Tổng số lượng xuất: -${totalQuantity.toLocaleString()} chiếc (${totalCount} chuyến)`
+      ],
+      data: skuStats,
+      columns: [
+        { header: "Mã SKU", key: "sku", width: 14 },
+        { header: "Tên Sản Phẩm (Mô Tả)", key: "descr", width: 42 },
+        { header: "Số Lượng Xuất (-)", key: "quantity", width: 18, format: v => `-${Number(v).toLocaleString()}` },
+        { header: "Số Chuyến / Phiếu", key: "count", width: 16, format: v => `${v} phiếu` },
+        { header: "Tỷ Trọng (%)", key: "quantity", width: 16, format: v => totalQuantity > 0 ? `${((v / totalQuantity) * 100).toFixed(1)}%` : "0%" }
+      ]
+    });
+    toast.success("Đã xuất file Excel thống kê SKU xuất kho!");
+  };
+
+  const exportOutboundDetailsExcel = () => {
+    if (groupedItems.length === 0) return toast.error("Không có dữ liệu để xuất");
+    exportToExcel({
+      filename: `Chi_Tiet_Phieu_Xuat_Kho_${selectedMonth || "All"}.xlsx`,
+      sheetName: "Chi_Tiet_Xuat",
+      title: "DANH SÁCH CHI TIẾT CÁC PHIẾU XUẤT KHO",
+      subtitles: [
+        `Kỳ báo cáo: Tháng ${selectedMonth} | Ngày: ${selectedDate}`,
+        `Tổng số dòng đã gom: ${groupedItems.length} | Tổng SL xuất: -${totalQuantity.toLocaleString()} chiếc`
+      ],
+      data: groupedItems,
+      columns: [
+        { header: "Ngày Xuất", key: "dateStr", width: 14, format: (v, r) => v || (r.date ? new Date(r.date).toISOString().split('T')[0] : "-") },
+        { header: "Mã Đơn / SO", key: "orderCode", width: 18 },
+        { header: "Mã SKU", key: "sku", width: 14 },
+        { header: "Tên Sản Phẩm", key: "descr", width: 40 },
+        { header: "Số Lượng Xuất (-)", key: "quantity", width: 18, format: v => `-${Number(v).toLocaleString()}` },
+        { header: "Khách Hàng / Lô / Địa Chỉ", key: "remark", width: 35 },
+        { header: "Người Tạo", key: "createdBy", width: 16 }
+      ]
+    });
+    toast.success("Đã xuất file Excel chi tiết phiếu xuất kho!");
+  };
 
   // Pagination based on grouped items
   const totalPages = Math.ceil(groupedItems.length / pageSize) || 1;
@@ -400,9 +448,17 @@ export default function OutboundPage() {
             </h3>
             <p className="text-xs text-slate-500">Tổng hợp chi tiết số lượng xuất và số chuyến giao hàng theo từng mã hàng</p>
           </div>
-          <span className="text-xs font-bold text-orange-700 bg-orange-50 border border-orange-200 px-3 py-1.5 rounded-xl">
-            Tổng xuất: -{totalQuantity.toLocaleString()} chiếc
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-bold text-orange-700 bg-orange-50 border border-orange-200 px-3 py-1.5 rounded-xl">
+              Tổng xuất: -{totalQuantity.toLocaleString()} chiếc
+            </span>
+            <button
+              onClick={exportSkuOutboundExcel}
+              className="flex items-center px-3.5 py-1.5 bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-xl text-xs transition-all shadow-sm active:scale-95"
+            >
+              <FileDown className="w-3.5 h-3.5 mr-1.5" /> Xuất Excel SKU
+            </button>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -464,6 +520,12 @@ export default function OutboundPage() {
               Hiển thị {paginatedItems.length} trên tổng số {groupedItems.length} dòng đã gom (tổng hợp từ {items.length} bản ghi chi tiết)
             </p>
           </div>
+          <button
+            onClick={exportOutboundDetailsExcel}
+            className="flex items-center px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-xl text-xs transition-all shadow-sm active:scale-95"
+          >
+            <FileDown className="w-3.5 h-3.5 mr-1.5" /> Xuất Excel Chi Tiết Xuất
+          </button>
         </div>
 
         <div className="overflow-x-auto">
