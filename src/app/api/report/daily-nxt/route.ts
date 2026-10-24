@@ -123,21 +123,41 @@ export async function GET(request: Request) {
 
     const allSkus = Object.keys(skuMeta);
 
-    // Xác định số tồn ban đầu ngày đầu tháng (firstMonthDay)
-    // Ưu tiên 1: Tồn từ bảng BaselineInventory tại firstMonthDay
-    const baselineFirstDayMap: Record<string, number> = {};
-    let hasBaselineOnFirstDay = false;
+    // ========================================================
+    // TỒN ĐẦU KỲ PHẢI LÀ DATA LÀM GỐC:
+    // Nhóm baseline theo từng ngày
+    const baselineByDateMap = new Map<string, Map<string, number>>();
     for (const b of baselines) {
       const d = toYMD(new Date(b.date));
-      if (d === firstMonthDay) {
-        baselineFirstDayMap[b.sku] = (baselineFirstDayMap[b.sku] || 0) + b.quantity;
-        hasBaselineOnFirstDay = true;
+      if (!baselineByDateMap.has(d)) {
+        baselineByDateMap.set(d, new Map<string, number>());
+      }
+      const bMap = baselineByDateMap.get(d)!;
+      bMap.set(b.sku, (bMap.get(b.sku) || 0) + b.quantity);
+    }
+
+    const availableBaselineDates = Array.from(baselineByDateMap.keys()).sort();
+
+    // Xác định ngày Baseline làm gốc (Anchor Date) cho tháng này:
+    // Ưu tiên 1: Baseline nằm trong tháng đang xem (ví dụ: ngày 22/10 hoặc ngày 01/10)
+    // Ưu tiên 2: Baseline gần nhất trước tháng đang xem (ví dụ: 30/09)
+    let anchorBaselineDate: string | null = null;
+    const lastDayOfMonth = monthCalendarDays[monthCalendarDays.length - 1];
+    const baselinesInMonth = availableBaselineDates.filter(d => d >= firstMonthDay && d <= lastDayOfMonth);
+
+    if (baselinesInMonth.length > 0) {
+      anchorBaselineDate = baselinesInMonth[baselinesInMonth.length - 1];
+    } else {
+      const baselinesBeforeMonth = availableBaselineDates.filter(d => d < firstMonthDay);
+      if (baselinesBeforeMonth.length > 0) {
+        anchorBaselineDate = baselinesBeforeMonth[baselinesBeforeMonth.length - 1];
       }
     }
 
-    // Xây dựng Timeline tính toán Lý Thuyết cuốn chiếu theo chiều xuôi từ đầu tháng:
-    // Tồn Cuối Lý Thuyết = Tồn Đầu + Nhập - Xuất
-    // Tồn Đầu Ngày Sau = Tồn Cuối Lý Thuyết Ngày Trước
+    const anchorStockMap = anchorBaselineDate ? (baselineByDateMap.get(anchorBaselineDate) || new Map<string, number>()) : new Map<string, number>();
+
+    // Xây dựng Timeline tính toán Lý Thuyết với TỒN ĐẦU KỲ LÀM GỐC:
+    // Nếu tồn đầu kỳ không phải là ngày đầu tháng (ví dụ: ngày 22/10), lấy ngày đó làm gốc để tính ngược lên đầu tháng và tính xuống ngày hiện tại
     const skuLedger: Record<string, Record<string, {
       opening: number;
       in: number;
@@ -151,44 +171,158 @@ export async function GET(request: Request) {
 
     for (const sku of allSkus) {
       skuLedger[sku] = {};
-      let runningOpening = 0;
+      const baseQty = anchorStockMap.get(sku) || 0;
 
-      if (hasBaselineOnFirstDay) {
-        runningOpening = baselineFirstDayMap[sku] || 0;
-      } else {
-        // Fallback: tính ngược từ currentStock
-        let cur = skuMeta[sku]?.currentStock || 0;
-        for (let i = allDatesSorted.length - 1; i >= 0; i--) {
-          const d = allDatesSorted[i];
-          if (d >= firstMonthDay) {
-            cur = cur - (ibMap[d]?.[sku] || 0) + (obMap[d]?.[sku] || 0);
-          }
+      if (!anchorBaselineDate) {
+        // Trường hợp không có baseline trong hệ thống: bắt đầu từ 0
+        let running = 0;
+        for (const d of monthCalendarDays) {
+          const inQty = ibMap[d]?.[sku] || 0;
+          const outQty = obMap[d]?.[sku] || 0;
+          const theoreticalClosing = running + inQty - outQty;
+          const hasActual = datesWithActualUpload.has(d);
+          const actualClosing = hasActual ? (actualStockMap[d]?.[sku] ?? 0) : null;
+          const variance = actualClosing !== null ? actualClosing - theoreticalClosing : null;
+
+          skuLedger[sku][d] = {
+            opening: running,
+            in: inQty,
+            out: outQty,
+            theoreticalClosing,
+            closing: theoreticalClosing,
+            actualClosing,
+            variance,
+            hasActual
+          };
+          running = theoreticalClosing;
         }
-        runningOpening = Math.max(0, cur);
-      }
+      } else if (anchorBaselineDate === firstMonthDay) {
+        // Trường hợp 1: Tồn đầu kỳ chính là ngày đầu tháng (01/tháng)
+        let running = baseQty;
+        for (const d of monthCalendarDays) {
+          const inQty = ibMap[d]?.[sku] || 0;
+          const outQty = obMap[d]?.[sku] || 0;
+          const theoreticalClosing = running + inQty - outQty;
+          const hasActual = datesWithActualUpload.has(d);
+          const actualClosing = hasActual ? (actualStockMap[d]?.[sku] ?? 0) : null;
+          const variance = actualClosing !== null ? actualClosing - theoreticalClosing : null;
 
-      for (const d of monthCalendarDays) {
-        const inQty = ibMap[d]?.[sku] || 0;
-        const outQty = obMap[d]?.[sku] || 0;
-        const opening = runningOpening;
-        const theoreticalClosing = opening + inQty - outQty;
+          skuLedger[sku][d] = {
+            opening: running,
+            in: inQty,
+            out: outQty,
+            theoreticalClosing,
+            closing: theoreticalClosing,
+            actualClosing,
+            variance,
+            hasActual
+          };
+          running = theoreticalClosing;
+        }
+      } else if (anchorBaselineDate > firstMonthDay && anchorBaselineDate <= lastDayOfMonth) {
+        // Trường hợp 2: Tồn đầu kỳ không phải là ngày đầu tháng (ví dụ: ngày 22/10)
+        // Lấy ngày đó làm gốc: Tồn cuối ngày đó = baseQty, rồi tính ngược lên đầu tháng và tính xuôi xuống ngày hiện tại
+        const anchorIdx = monthCalendarDays.indexOf(anchorBaselineDate);
+        
+        // Điểm gốc tại ngày anchorBaselineDate:
+        const inAtAnchor = ibMap[anchorBaselineDate]?.[sku] || 0;
+        const outAtAnchor = obMap[anchorBaselineDate]?.[sku] || 0;
+        const closingAtAnchor = baseQty;
+        const openingAtAnchor = closingAtAnchor - inAtAnchor + outAtAnchor;
+        
+        const hasActualAtAnchor = datesWithActualUpload.has(anchorBaselineDate);
+        const actualClosingAtAnchor = hasActualAtAnchor ? (actualStockMap[anchorBaselineDate]?.[sku] ?? 0) : null;
 
-        const hasActual = datesWithActualUpload.has(d);
-        const actualClosing = hasActual ? (actualStockMap[d]?.[sku] ?? 0) : null;
-        const variance = actualClosing !== null ? actualClosing - theoreticalClosing : null;
-
-        skuLedger[sku][d] = {
-          opening,
-          in: inQty,
-          out: outQty,
-          theoreticalClosing,
-          closing: theoreticalClosing,
-          actualClosing,
-          variance,
-          hasActual
+        skuLedger[sku][anchorBaselineDate] = {
+          opening: openingAtAnchor,
+          in: inAtAnchor,
+          out: outAtAnchor,
+          theoreticalClosing: closingAtAnchor,
+          closing: closingAtAnchor,
+          actualClosing: actualClosingAtAnchor,
+          variance: actualClosingAtAnchor !== null ? actualClosingAtAnchor - closingAtAnchor : null,
+          hasActual: hasActualAtAnchor
         };
 
-        runningOpening = theoreticalClosing;
+        // A. TÍNH NGƯỢC LÊN ĐẦU THÁNG (Reverse rollback from anchorIdx - 1 down to 0)
+        for (let i = anchorIdx - 1; i >= 0; i--) {
+          const d = monthCalendarDays[i];
+          const dNext = monthCalendarDays[i + 1];
+          const theoreticalClosing = skuLedger[sku][dNext].opening;
+          const inQty = ibMap[d]?.[sku] || 0;
+          const outQty = obMap[d]?.[sku] || 0;
+          const opening = theoreticalClosing - inQty + outQty;
+
+          const hasActual = datesWithActualUpload.has(d);
+          const actualClosing = hasActual ? (actualStockMap[d]?.[sku] ?? 0) : null;
+          const variance = actualClosing !== null ? actualClosing - theoreticalClosing : null;
+
+          skuLedger[sku][d] = {
+            opening,
+            in: inQty,
+            out: outQty,
+            theoreticalClosing,
+            closing: theoreticalClosing,
+            actualClosing,
+            variance,
+            hasActual
+          };
+        }
+
+        // B. TÍNH XUỐNG NGÀY HIỆN TẠI VÀ CUỐI THÁNG (Forward roll from anchorIdx + 1 to end of month)
+        for (let i = anchorIdx + 1; i < monthCalendarDays.length; i++) {
+          const d = monthCalendarDays[i];
+          const dPrev = monthCalendarDays[i - 1];
+          const opening = skuLedger[sku][dPrev].theoreticalClosing;
+          const inQty = ibMap[d]?.[sku] || 0;
+          const outQty = obMap[d]?.[sku] || 0;
+          const theoreticalClosing = opening + inQty - outQty;
+
+          const hasActual = datesWithActualUpload.has(d);
+          const actualClosing = hasActual ? (actualStockMap[d]?.[sku] ?? 0) : null;
+          const variance = actualClosing !== null ? actualClosing - theoreticalClosing : null;
+
+          skuLedger[sku][d] = {
+            opening,
+            in: inQty,
+            out: outQty,
+            theoreticalClosing,
+            closing: theoreticalClosing,
+            actualClosing,
+            variance,
+            hasActual
+          };
+        }
+      } else {
+        // Trường hợp 3: anchorBaselineDate < firstMonthDay (nằm ở tháng trước)
+        // Cuốn chiếu từ anchorBaselineDate tiến vào tháng này
+        let cur = baseQty;
+        for (const d of allDatesSorted) {
+          if (d > anchorBaselineDate && d < firstMonthDay) {
+            cur = cur + (ibMap[d]?.[sku] || 0) - (obMap[d]?.[sku] || 0);
+          }
+        }
+        let running = cur;
+        for (const d of monthCalendarDays) {
+          const inQty = ibMap[d]?.[sku] || 0;
+          const outQty = obMap[d]?.[sku] || 0;
+          const theoreticalClosing = running + inQty - outQty;
+          const hasActual = datesWithActualUpload.has(d);
+          const actualClosing = hasActual ? (actualStockMap[d]?.[sku] ?? 0) : null;
+          const variance = actualClosing !== null ? actualClosing - theoreticalClosing : null;
+
+          skuLedger[sku][d] = {
+            opening: running,
+            in: inQty,
+            out: outQty,
+            theoreticalClosing,
+            closing: theoreticalClosing,
+            actualClosing,
+            variance,
+            hasActual
+          };
+          running = theoreticalClosing;
+        }
       }
     }
 

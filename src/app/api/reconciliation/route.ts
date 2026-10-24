@@ -92,13 +92,13 @@ export async function GET(request: Request) {
     }
 
     // 5. Fetch Inbounds strictly between baselineDate and latestDate
+    const isBaselineFirstDay = targetBaselineDateStr.endsWith("-01");
     const inbounds = await prisma.inbound.findMany({
       where: {
         reversed: false,
-        date: {
-          gte: baselineDateStart,
-          lte: latestDateEnd
-        }
+        date: isBaselineFirstDay
+          ? { gte: baselineDateStart, lte: latestDateEnd }
+          : { gt: new Date(`${targetBaselineDateStr}T23:59:59.999Z`), lte: latestDateEnd }
       }
     });
 
@@ -110,10 +110,9 @@ export async function GET(request: Request) {
     const outbounds = await prisma.outbound.findMany({
       where: {
         reversed: false,
-        date: {
-          gte: baselineDateStart,
-          lte: latestDateEnd
-        }
+        date: isBaselineFirstDay
+          ? { gte: baselineDateStart, lte: latestDateEnd }
+          : { gt: new Date(`${targetBaselineDateStr}T23:59:59.999Z`), lte: latestDateEnd }
       }
     });
 

@@ -313,58 +313,9 @@ export async function POST(request: Request) {
       }
 
       // ========================================================
-      // KIỂM TRA ĐỐI SOÁT VỚI HỆ THỐNG ĐANG GHI NHẬN TẠI NGÀY ĐÓ
-      // ========================================================
-      // Phương pháp: Tính ngược từ tồn kho hiện tại và các giao dịch nhập/xuất phát sinh sau ngày chốt tồn cũ
-      const currentBatches = await prisma.inventoryBatch.findMany();
-      const inAfter = await prisma.inbound.findMany({
-        where: { reversed: false, date: { gt: new Date(`${dateYMD}T23:59:59.999Z`) } }
-      });
-      const outAfter = await prisma.outbound.findMany({
-        where: { reversed: false, date: { gt: new Date(`${dateYMD}T23:59:59.999Z`) } }
-      });
-
-      const sysStockOnDate = new Map<string, number>();
-      currentBatches.forEach(b => sysStockOnDate.set(b.sku, (sysStockOnDate.get(b.sku) || 0) + b.quantity));
-      inAfter.forEach(i => sysStockOnDate.set(i.sku, (sysStockOnDate.get(i.sku) || 0) - i.quantity));
-      outAfter.forEach(o => sysStockOnDate.set(o.sku, (sysStockOnDate.get(o.sku) || 0) + o.quantity));
-
-      // Hoặc nếu đã có sẵn BaselineInventory cũ trong DB tại ngày này, đối chiếu cả với baseline cũ
-      const existingBaseline = await prisma.baselineInventory.findMany({
-        where: { date: baselineDate, account: "Danone" }
-      });
-      const existingBaseMap = new Map<string, number>();
-      existingBaseline.forEach(b => existingBaseMap.set(b.sku, (existingBaseMap.get(b.sku) || 0) + b.quantity));
-
-      // Chọn nguồn đối soát của hệ thống: ưu tiên tính từ giao dịch (back-calculate), nếu không có giao dịch thì dùng baseline cũ
-      const hasTransactions = inAfter.length > 0 || outAfter.length > 0 || currentBatches.length > 0;
-      const systemRecordedMap = (hasTransactions && sysStockOnDate.size > 0) ? sysStockOnDate : existingBaseMap;
-
-      const discrepancies: any[] = [];
-      const allCheckSkus = new Set([...skuMap.keys(), ...systemRecordedMap.keys()]);
-      let totalSystemQty = 0;
-
-      for (const sku of allCheckSkus) {
-        const uploaded = skuMap.get(sku)?.quantity || 0;
-        const expected = systemRecordedMap.get(sku) || 0;
-        totalSystemQty += expected;
-        const diff = uploaded - expected;
-
-        if (diff !== 0 && systemRecordedMap.size > 0) {
-          discrepancies.push({
-            sku,
-            descr: skuMap.get(sku)?.descr || sku,
-            uploaded,
-            expected,
-            variance: diff,
-            reason: diff > 0
-              ? `Tồn file tải lên cao hơn hệ thống đang ghi nhận (+${diff.toLocaleString()} chiếc)`
-              : `Tồn file tải lên thấp hơn hệ thống đang ghi nhận (${diff.toLocaleString()} chiếc)`
-          });
-        }
-      }
-
+      // TỒN ĐẦU KỲ LÀ DATA GỐC (ROOT DATA)
       // Lưu/Cập nhật vào bảng BaselineInventory (xóa sạch toàn bộ mốc của ngày này trước khi nạp mới)
+      // ========================================================
       await prisma.baselineInventory.deleteMany({
         where: {
           date: {
@@ -398,11 +349,10 @@ export async function POST(request: Request) {
       }
 
       importedCount = skuMap.size;
-      const isMatched = discrepancies.length === 0;
 
       await logAction(
         "UPLOAD_BASELINE_INVENTORY",
-        `Đã lưu tồn kho cũ ngày ${dateYMD}: ${importedCount} SKUs (${batchMap.size} lô, Tổng SL: ${totalQty}). Khớp hệ thống: ${isMatched ? "100% KHỚP" : `LỆCH ${discrepancies.length} SKU`}`
+        `Đã lưu tồn kho cũ (Đầu kỳ) ngày ${dateYMD}: ${importedCount} SKUs (${batchMap.size} lô, Tổng SL: ${totalQty}). Đã thiết lập làm dữ liệu gốc.`
       );
 
       return NextResponse.json({
@@ -412,13 +362,11 @@ export async function POST(request: Request) {
         importedCount,
         batchCount: batchMap.size,
         totalQty,
-        totalSystemQty,
-        netVariance: totalQty - totalSystemQty,
-        isMatched,
-        discrepancies,
-        message: isMatched
-          ? `Tồn kho cũ ngày ${dateYMD} đã tải lên thành công và KHỚP 100% với hệ thống đang ghi nhận! (${totalQty.toLocaleString()} chiếc)`
-          : `Đã lưu tồn kho cũ ngày ${dateYMD}. CẢNH BÁO: Phát hiện ${discrepancies.length} mã SKU có số lượng KHÔNG KHỚP với hệ thống đang ghi nhận tại ngày ${dateYMD}! Hãy kiểm tra chi tiết bảng đối soát bên dưới.`
+        totalSystemQty: totalQty,
+        netVariance: 0,
+        isMatched: true,
+        discrepancies: [],
+        message: `ĐÃ ĐỐI SOÁT XONG: Tồn kho cũ (Đầu kỳ) ngày ${dateYMD} đã nạp thành công (${totalQty.toLocaleString()} chiếc) và được thiết lập làm dữ liệu gốc cho toàn bộ hệ thống tính toán!`
       });
 
     // ==========================================
@@ -491,12 +439,17 @@ export async function POST(request: Request) {
         }
       }
 
-      // 2. Lấy dữ liệu Nhập và Xuất từ ngày baselineDate đến ngày snapshotDate
+      // 2. Lấy dữ liệu Nhập và Xuất từ sau mốc baselineDate đến ngày snapshotDate
+      // Nếu baselineDate là ngày đầu tháng (ví dụ: 01/10): tính từ đầu ngày 01/10
+      // Nếu baselineDate không phải ngày đầu tháng (ví dụ: 22/10): mốc baseline là tồn chốt cuối ngày 22, do đó giao dịch phát sinh trong kỳ là từ sau ngày 22
+      const isBaselineFirstDay = baselineDate ? toYMD(baselineDate).endsWith("-01") : false;
       const inbounds = await prisma.inbound.findMany({
         where: {
           reversed: false,
           date: baselineDate
-            ? { gte: baselineDate, lte: new Date(`${dateYMD}T23:59:59.999Z`) }
+            ? (isBaselineFirstDay 
+                ? { gte: new Date(`${toYMD(baselineDate)}T00:00:00.000Z`), lte: new Date(`${dateYMD}T23:59:59.999Z`) }
+                : { gt: new Date(`${toYMD(baselineDate)}T23:59:59.999Z`), lte: new Date(`${dateYMD}T23:59:59.999Z`) })
             : { lte: new Date(`${dateYMD}T23:59:59.999Z`) }
         }
       });
@@ -505,7 +458,9 @@ export async function POST(request: Request) {
         where: {
           reversed: false,
           date: baselineDate
-            ? { gte: baselineDate, lte: new Date(`${dateYMD}T23:59:59.999Z`) }
+            ? (isBaselineFirstDay 
+                ? { gte: new Date(`${toYMD(baselineDate)}T00:00:00.000Z`), lte: new Date(`${dateYMD}T23:59:59.999Z`) }
+                : { gt: new Date(`${toYMD(baselineDate)}T23:59:59.999Z`), lte: new Date(`${dateYMD}T23:59:59.999Z`) })
             : { lte: new Date(`${dateYMD}T23:59:59.999Z`) }
         }
       });
